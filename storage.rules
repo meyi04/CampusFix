@@ -1,0 +1,60 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function activeUser() {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.active == true;
+    }
+
+    function isAdmin() {
+      return activeUser() && request.auth.token.role == 'admin';
+    }
+
+    function canViewReport(reportId) {
+      return firestore.exists(/databases/(default)/documents/reports/$(reportId))
+        && (
+          isAdmin()
+          || firestore.get(/databases/(default)/documents/reports/$(reportId)).data.reporterUid == request.auth.uid
+          || (
+            request.auth.token.role == 'maintenance'
+            && firestore.get(/databases/(default)/documents/reports/$(reportId)).data.assignedToUid == request.auth.uid
+          )
+        );
+    }
+
+    function canUploadReportImage(reportId, uploaderUid) {
+      let reportPath = /databases/(default)/documents/reports/$(reportId);
+      let profile = firestore.get(/databases/(default)/documents/users/$(uploaderUid)).data;
+      return uploaderUid == request.auth.uid
+        && (
+          (!firestore.exists(reportPath) && profile.role in ['student', 'faculty'])
+          || (
+            firestore.exists(reportPath)
+            && (
+              firestore.get(reportPath).data.reporterUid == request.auth.uid
+              || (
+                request.auth.token.role == 'maintenance'
+                && firestore.get(reportPath).data.assignedToUid == request.auth.uid
+              )
+            )
+          )
+        );
+    }
+
+    match /reports/{reportId}/{uploaderUid}/{fileName} {
+      allow read: if activeUser()
+        && (uploaderUid == request.auth.uid || canViewReport(reportId));
+      allow create: if activeUser()
+        && canUploadReportImage(reportId, uploaderUid)
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp|gif|heic|heif)');
+      allow update: if false;
+      allow delete: if activeUser() && uploaderUid == request.auth.uid;
+    }
+  }
+}

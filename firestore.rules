@@ -1,0 +1,494 @@
+  rules_version = '2';
+  service cloud.firestore {
+    match /databases/{database}/documents {
+      function signedIn() {
+        return request.auth != null;
+      }
+
+      function activeAccount(uid) {
+        return exists(/databases/$(database)/documents/users/$(uid))
+          && get(/databases/$(database)/documents/users/$(uid)).data.active == true;
+      }
+
+      function activeUser() {
+        return signedIn() && activeAccount(request.auth.uid);
+      }
+
+      function hasRole(role) {
+        return activeUser()
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+      }
+
+      function isAdmin() {
+        return hasRole('admin');
+      }
+
+      function isMaintenance() {
+        return hasRole('maintenance');
+      }
+
+      function canViewReport(report) {
+        return activeUser() && (
+          isAdmin()
+          || report.reporterUid == request.auth.uid
+          || (isMaintenance() && report.assignedToUid == request.auth.uid)
+        );
+      }
+
+      function canViewReportId(reportId) {
+        return exists(/databases/$(database)/documents/reports/$(reportId))
+          && canViewReport(get(/databases/$(database)/documents/reports/$(reportId)).data);
+      }
+
+      function validPriority(priority) {
+        return priority in ['Low', 'Normal', 'High', 'Urgent'];
+      }
+
+      function validStatus(status) {
+        return status in [
+          'Submitted', 'Under Review', 'Approved', 'Assigned', 'In Progress',
+          'Pending Verification', 'Resolved', 'Closed', 'Rejected',
+          'Needs Clarification', 'Reopened'
+        ];
+      }
+
+      function linkedAudit(auditId, action, targetField, targetId) {
+        let auditPath = /databases/$(database)/documents/auditLogs/$(auditId);
+        return auditId is string
+          && !exists(auditPath)
+          && existsAfter(auditPath)
+          && getAfter(auditPath).data.actorUid == request.auth.uid
+          && getAfter(auditPath).data.actorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.fullName
+          && getAfter(auditPath).data.action == action
+          && getAfter(auditPath).data.get(targetField, '') == targetId
+          && getAfter(auditPath).data.createdAt == request.time;
+      }
+
+      function adminStatusChange() {
+        let oldStatus = resource.data.status;
+        let newStatus = request.resource.data.status;
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return isAdmin()
+          && validStatus(newStatus)
+          && (
+            (oldStatus == 'Submitted'
+              && newStatus in ['Under Review', 'Rejected', 'Needs Clarification']
+              && keys.hasOnly(['status', 'updatedAt', 'lastHistoryId', 'lastAuditId']))
+            || (oldStatus == 'Under Review'
+              && newStatus in ['Approved', 'Rejected', 'Needs Clarification']
+              && keys.hasOnly(['status', 'updatedAt', 'lastHistoryId', 'lastAuditId']))
+            || (oldStatus in ['Needs Clarification', 'Reopened']
+              && newStatus == 'Under Review'
+              && keys.hasOnly(['status', 'updatedAt', 'lastHistoryId', 'lastAuditId']))
+            || (oldStatus == 'Approved'
+              && newStatus == 'Assigned'
+              && keys.hasOnly(['status', 'updatedAt', 'assignedToUid', 'assignedToName', 'assignedAt', 'lastHistoryId', 'lastAuditId'])
+              && request.resource.data.assignedToUid is string
+              && exists(/databases/$(database)/documents/users/$(request.resource.data.assignedToUid))
+              && get(/databases/$(database)/documents/users/$(request.resource.data.assignedToUid)).data.role == 'maintenance'
+              && get(/databases/$(database)/documents/users/$(request.resource.data.assignedToUid)).data.active == true)
+            || (oldStatus == 'Pending Verification'
+              && newStatus == 'Resolved'
+              && keys.hasOnly(['status', 'updatedAt', 'completedAt', 'resolutionNotes', 'lastHistoryId', 'lastAuditId'])
+              && request.resource.data.resolutionNotes is string
+              && request.resource.data.resolutionNotes.size() >= 5)
+            || (oldStatus == 'Pending Verification'
+              && newStatus == 'In Progress'
+              && keys.hasOnly(['status', 'updatedAt', 'lastHistoryId', 'lastAuditId']))
+            || (oldStatus == 'Resolved'
+              && newStatus == 'Closed'
+              && keys.hasOnly(['status', 'updatedAt', 'completedAt', 'resolutionNotes', 'lastHistoryId', 'lastAuditId'])
+              && request.resource.data.resolutionNotes is string
+              && request.resource.data.resolutionNotes.size() >= 5)
+          );
+      }
+
+      function maintenanceStatusChange() {
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return isMaintenance()
+          && resource.data.assignedToUid == request.auth.uid
+          && (
+            (resource.data.status == 'Assigned'
+              && request.resource.data.status == 'In Progress'
+              && keys.hasOnly(['status', 'updatedAt', 'startedAt', 'lastHistoryId']))
+            || (resource.data.status == 'In Progress'
+              && request.resource.data.status == 'Pending Verification'
+              && keys.hasOnly(['status', 'updatedAt', 'lastHistoryId']))
+          );
+      }
+
+      function maintenancePhotoUpdate() {
+        let photos = request.resource.data.maintenancePhotos;
+        return isMaintenance()
+          && resource.data.assignedToUid == request.auth.uid
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['maintenancePhotos', 'updatedAt', 'lastHistoryId'])
+          && photos is list
+          && photos.size() <= 10
+          && resource.data.status in ['Assigned', 'In Progress', 'Pending Verification']
+          && photos.size() == resource.data.get('maintenancePhotos', []).size() + 1
+          && photos[photos.size() - 1].keys().hasOnly(['photoId', 'phase', 'uploadedBy'])
+          && photos[photos.size() - 1].uploadedBy == request.auth.uid
+          && photos[photos.size() - 1].photoId is string
+          && photos[photos.size() - 1].phase in ['before', 'after']
+          && existsAfter(/databases/$(database)/documents/reportPhotos/$(photos[photos.size() - 1].photoId))
+          && getAfter(/databases/$(database)/documents/reportPhotos/$(photos[photos.size() - 1].photoId)).data.reportId == resource.data.id
+          && getAfter(/databases/$(database)/documents/reportPhotos/$(photos[photos.size() - 1].photoId)).data.kind == 'maintenance'
+          && getAfter(/databases/$(database)/documents/reportPhotos/$(photos[photos.size() - 1].photoId)).data.phase == photos[photos.size() - 1].phase
+          && getAfter(/databases/$(database)/documents/reportPhotos/$(photos[photos.size() - 1].photoId)).data.uploaderUid == request.auth.uid;
+      }
+
+      function reporterReopen() {
+        return resource.data.reporterUid == request.auth.uid
+          && resource.data.status == 'Resolved'
+          && request.resource.data.status == 'Reopened'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'lastHistoryId']);
+      }
+
+      function adminPriorityChange() {
+        return isAdmin()
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.priority != resource.data.priority
+          && validPriority(request.resource.data.priority)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['priority', 'updatedAt', 'lastHistoryId', 'lastAuditId']);
+      }
+
+      function linkedUpdateHistory(reportId) {
+        let historyId = request.resource.data.lastHistoryId;
+        let historyPath = /databases/$(database)/documents/reportHistory/$(historyId);
+        return historyId is string
+          && historyId != resource.data.get('lastHistoryId', '')
+          && !exists(historyPath)
+          && existsAfter(historyPath)
+          && getAfter(historyPath).data.reportId == reportId
+          && getAfter(historyPath).data.actorUid == request.auth.uid
+          && getAfter(historyPath).data.previousStatus == resource.data.status
+          && getAfter(historyPath).data.newStatus == request.resource.data.status;
+      }
+
+      function linkedReportAudit(reportId) {
+        let auditId = request.resource.data.lastAuditId;
+        let auditPath = /databases/$(database)/documents/auditLogs/$(auditId);
+        return auditId is string
+          && auditId != resource.data.get('lastAuditId', '')
+          && (
+            linkedAudit(auditId, 'report.status.changed', 'reportId', reportId)
+            || linkedAudit(auditId, 'report.priority.changed', 'reportId', reportId)
+          );
+      }
+
+      function adminRoleChange(uid) {
+        return isAdmin()
+          && request.auth.uid != uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'lastAuditId'])
+          && request.resource.data.role in ['student', 'faculty', 'maintenance', 'admin']
+          && request.resource.data.role != resource.data.role
+          && linkedAudit(request.resource.data.lastAuditId, 'user.role.changed', 'targetUid', uid);
+      }
+
+      match /users/{uid} {
+        allow get: if activeUser() && (request.auth.uid == uid || isAdmin())
+          || signedIn() && request.auth.uid == uid;
+        allow list: if isAdmin();
+        allow create: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly([
+            'uid', 'fullName', 'email', 'role', 'identifier', 'department',
+            'contact', 'active', 'createdAt'
+          ])
+          && request.resource.data.uid == uid
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.role in ['student', 'faculty', 'maintenance']
+          && request.resource.data.active == true
+          && request.resource.data.fullName is string
+          && request.resource.data.fullName.size() >= 2
+          && request.resource.data.createdAt == request.time;
+        allow update: if activeUser() && (
+          (isAdmin()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'lastAuditId'])
+            && request.resource.data.active is bool
+            && request.resource.data.active != resource.data.active
+            && linkedAudit(request.resource.data.lastAuditId, 'user.active.changed', 'targetUid', uid))
+          || adminRoleChange(uid)
+        );
+        allow delete: if false;
+
+        match /devices/{deviceId} {
+          allow read, create, update, delete: if activeUser() && request.auth.uid == uid;
+        }
+      }
+
+      match /reports/{reportId} {
+        allow get, list: if canViewReport(resource.data);
+        allow create: if activeUser()
+          && request.resource.data.keys().hasOnly([
+            'id', 'title', 'description', 'category', 'categoryId', 'buildingId',
+            'buildingName', 'room', 'priority', 'status', 'imageUrls', 'reporterUid',
+            'reporterName', 'assignedToUid', 'assignedToName', 'latitude', 'longitude',
+            'createdAt', 'updatedAt', 'lastHistoryId'
+          ])
+          && request.resource.data.id == reportId
+          && request.resource.data.reporterUid == request.auth.uid
+          && request.resource.data.reporterName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.fullName
+          && request.resource.data.status == 'Submitted'
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['student', 'faculty']
+          && request.resource.data.assignedToUid == null
+          && request.resource.data.assignedToName == null
+          && validPriority(request.resource.data.priority)
+          && request.resource.data.title is string
+          && request.resource.data.title.size() >= 5
+          && request.resource.data.description is string
+          && request.resource.data.description.size() >= 20
+          && request.resource.data.imageUrls is list
+          && request.resource.data.imageUrls.size() <= 5
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.lastHistoryId is string
+          && existsAfter(/databases/$(database)/documents/reportHistory/$(request.resource.data.lastHistoryId))
+          && getAfter(/databases/$(database)/documents/reportHistory/$(request.resource.data.lastHistoryId)).data.reportId == reportId
+          && getAfter(/databases/$(database)/documents/reportHistory/$(request.resource.data.lastHistoryId)).data.actorUid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/reportHistory/$(request.resource.data.lastHistoryId)).data.previousStatus == null
+          && getAfter(/databases/$(database)/documents/reportHistory/$(request.resource.data.lastHistoryId)).data.newStatus == 'Submitted'
+          && exists(/databases/$(database)/documents/buildings/$(request.resource.data.buildingId))
+          && get(/databases/$(database)/documents/buildings/$(request.resource.data.buildingId)).data.active == true
+          && get(/databases/$(database)/documents/buildings/$(request.resource.data.buildingId)).data.name == request.resource.data.buildingName
+          && exists(/databases/$(database)/documents/facilityCategories/$(request.resource.data.categoryId))
+          && get(/databases/$(database)/documents/facilityCategories/$(request.resource.data.categoryId)).data.active == true
+          && get(/databases/$(database)/documents/facilityCategories/$(request.resource.data.categoryId)).data.name == request.resource.data.category;
+        allow update: if activeUser()
+          && resource.data.reporterUid == request.resource.data.reporterUid
+          && resource.data.id == request.resource.data.id
+          && resource.data.createdAt == request.resource.data.createdAt
+          && resource.data.imageUrls == request.resource.data.imageUrls
+          && resource.data.buildingId == request.resource.data.buildingId
+          && resource.data.categoryId == request.resource.data.categoryId
+          && linkedUpdateHistory(reportId)
+          && (!isAdmin() || linkedReportAudit(reportId))
+          && (adminStatusChange() || adminPriorityChange() || maintenanceStatusChange() || maintenancePhotoUpdate() || reporterReopen());
+        allow delete: if false;
+      }
+
+      match /reportPhotos/{chunkId} {
+        allow read: if activeUser() && canViewReportId(resource.data.reportId);
+        allow create: if activeUser()
+          && request.resource.data.keys().hasAll([
+            'reportId', 'photoId', 'uploaderUid', 'photoIndex', 'chunkIndex',
+            'chunkCount', 'kind', 'contentType', 'fileName', 'data', 'createdAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'reportId', 'photoId', 'uploaderUid', 'photoIndex', 'chunkIndex',
+            'chunkCount', 'kind', 'contentType', 'fileName', 'data', 'phase', 'createdAt'
+          ])
+          && request.resource.data.reportId is string
+          && request.resource.data.photoId is string
+          && request.resource.data.uploaderUid == request.auth.uid
+          && request.resource.data.photoIndex is int
+          && request.resource.data.photoIndex >= 0
+          && request.resource.data.photoIndex < 5
+          && request.resource.data.chunkIndex is int
+          && request.resource.data.chunkIndex >= 0
+          && request.resource.data.chunkCount is int
+          && request.resource.data.chunkCount > 0
+          && request.resource.data.chunkCount <= 12
+          && request.resource.data.chunkIndex < request.resource.data.chunkCount
+          && request.resource.data.kind in ['report', 'maintenance']
+          && request.resource.data.contentType in [
+            'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'
+          ]
+          && request.resource.data.fileName is string
+          && request.resource.data.fileName.size() <= 255
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 614400
+          && request.resource.data.createdAt == request.time
+          && (
+            (request.resource.data.kind == 'report'
+              && !exists(/databases/$(database)/documents/reports/$(request.resource.data.reportId))
+              && existsAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId))
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.reporterUid == request.auth.uid
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.status == 'Submitted'
+              && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['student', 'faculty'])
+            || (request.resource.data.kind == 'maintenance'
+              && request.resource.data.phase in ['before', 'after']
+              && exists(/databases/$(database)/documents/reports/$(request.resource.data.reportId))
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.assignedToUid == request.auth.uid
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.status in ['Assigned', 'In Progress', 'Pending Verification']
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.maintenancePhotos is list
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.maintenancePhotos.size() > 0
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.maintenancePhotos[
+                getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.maintenancePhotos.size() - 1
+              ].photoId == request.resource.data.photoId
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.maintenancePhotos[
+                getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.maintenancePhotos.size() - 1
+              ].phase == request.resource.data.phase
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.maintenancePhotos[
+                getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.maintenancePhotos.size() - 1
+              ].uploadedBy == request.auth.uid)
+          );
+        allow update, delete: if false;
+      }
+
+      match /reportHistory/{historyId} {
+        allow read: if activeUser() && canViewReportId(resource.data.reportId);
+        allow create: if activeUser()
+          && request.resource.data.keys().hasOnly([
+            'id', 'reportId', 'previousStatus', 'newStatus', 'actorUid',
+            'actorName', 'notes', 'createdAt', 'assignedToUid', 'assignedToName'
+          ])
+          && request.resource.data.id == historyId
+          && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.lastHistoryId == historyId
+          && request.resource.data.actorUid == request.auth.uid
+          && request.resource.data.actorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.fullName
+          && request.resource.data.notes is string
+          && request.resource.data.notes.size() <= 2000
+          && request.resource.data.createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId))
+          && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.status == request.resource.data.newStatus
+          && (
+            (request.resource.data.previousStatus == null
+              && request.resource.data.newStatus == 'Submitted'
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.reporterUid == request.auth.uid)
+            || (isAdmin()
+              && request.resource.data.previousStatus == get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.status
+              && request.resource.data.newStatus != request.resource.data.previousStatus)
+            || (isAdmin()
+              && request.resource.data.previousStatus == get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.status
+              && request.resource.data.newStatus == request.resource.data.previousStatus
+              && get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.priority
+                != getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.priority)
+            || (isMaintenance()
+              && get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.assignedToUid == request.auth.uid
+              && request.resource.data.previousStatus == get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.status)
+            || (get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.reporterUid == request.auth.uid
+              && get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.status == 'Resolved'
+              && request.resource.data.newStatus == 'Reopened')
+          );
+        allow update, delete: if false;
+      }
+
+      match /reportComments/{commentId} {
+        allow read: if activeUser() && canViewReportId(resource.data.reportId);
+        allow create: if activeUser()
+          && request.resource.data.keys().hasOnly(['reportId', 'authorUid', 'authorName', 'body', 'createdAt'])
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.authorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.fullName
+          && request.resource.data.body is string
+          && request.resource.data.body.size() >= 2
+          && request.resource.data.body.size() <= 1000
+          && request.resource.data.createdAt == request.time
+          && canViewReportId(request.resource.data.reportId);
+        allow update, delete: if false;
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if activeUser() && resource.data.recipientUid == request.auth.uid;
+        allow create: if activeUser()
+          && request.resource.data.keys().hasOnly([
+            'id', 'recipientUid', 'reportId', 'title', 'body', 'read', 'createdAt'
+          ])
+          && request.resource.data.id == notificationId
+          && request.resource.data.read == false
+          && request.resource.data.title is string
+          && request.resource.data.body is string
+          && request.resource.data.createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId))
+          && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.reporterUid == request.resource.data.recipientUid
+          && (
+            (request.resource.data.title == 'Report submitted'
+              && request.resource.data.recipientUid == request.auth.uid
+              && getAfter(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.status == 'Submitted')
+          );
+        allow update: if activeUser()
+          && resource.data.recipientUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+          && request.resource.data.read == true;
+        allow delete: if false;
+      }
+
+      match /buildings/{buildingId} {
+        allow read: if activeUser() && (isAdmin() || resource.data.active == true);
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly(['name', 'active', 'createdAt', 'createdAuditId'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 2
+          && request.resource.data.active == true
+          && request.resource.data.createdAt == request.time
+          && linkedAudit(request.resource.data.createdAuditId, 'buildings.created', 'targetId', buildingId);
+        allow update: if isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'lastAuditId'])
+          && request.resource.data.active is bool
+          && request.resource.data.active != resource.data.active
+          && linkedAudit(request.resource.data.lastAuditId, 'buildings.active.changed', 'targetId', buildingId);
+        allow delete: if false;
+      }
+
+      match /rooms/{roomId} {
+        allow read: if activeUser() && (isAdmin() || resource.data.active == true);
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly(['buildingId', 'name', 'active', 'createdAt', 'createdAuditId'])
+          && request.resource.data.buildingId is string
+          && exists(/databases/$(database)/documents/buildings/$(request.resource.data.buildingId))
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 1
+          && request.resource.data.active == true
+          && request.resource.data.createdAt == request.time
+          && linkedAudit(request.resource.data.createdAuditId, 'rooms.created', 'targetId', roomId);
+        allow update: if isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'lastAuditId'])
+          && request.resource.data.active is bool
+          && request.resource.data.active != resource.data.active
+          && linkedAudit(request.resource.data.lastAuditId, 'rooms.active.changed', 'targetId', roomId);
+        allow delete: if false;
+      }
+
+      match /facilityCategories/{categoryId} {
+        allow read: if activeUser() && (isAdmin() || resource.data.active == true);
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly(['name', 'active', 'createdAt', 'createdAuditId'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() >= 2
+          && request.resource.data.active == true
+          && request.resource.data.createdAt == request.time
+          && linkedAudit(request.resource.data.createdAuditId, 'facilityCategories.created', 'targetId', categoryId);
+        allow update: if isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'lastAuditId'])
+          && request.resource.data.active is bool
+          && request.resource.data.active != resource.data.active
+          && linkedAudit(request.resource.data.lastAuditId, 'facilityCategories.active.changed', 'targetId', categoryId);
+        allow delete: if false;
+      }
+
+      match /announcements/{announcementId} {
+        allow read: if activeUser() && resource.data.active == true;
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly(['title', 'body', 'authorUid', 'active', 'createdAt', 'createdAuditId'])
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.title is string
+          && request.resource.data.title.size() >= 3
+          && request.resource.data.body is string
+          && request.resource.data.body.size() >= 5
+          && request.resource.data.active == true
+          && request.resource.data.createdAt == request.time
+          && linkedAudit(request.resource.data.createdAuditId, 'announcement.created', 'targetId', announcementId);
+        allow update: if isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'lastAuditId'])
+          && request.resource.data.active == false
+          && resource.data.active == true
+          && linkedAudit(request.resource.data.lastAuditId, 'announcement.active.changed', 'targetId', announcementId);
+        allow delete: if false;
+      }
+
+      match /auditLogs/{logId} {
+        allow read: if isAdmin();
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly([
+            'actorUid', 'actorName', 'action', 'targetUid', 'targetId',
+            'role', 'previousRole', 'active', 'reportId', 'previousStatus',
+            'newStatus', 'previousPriority', 'newPriority', 'createdAt'
+          ])
+          && request.resource.data.actorUid == request.auth.uid
+          && request.resource.data.actorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.fullName
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+  }
