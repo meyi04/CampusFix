@@ -3,10 +3,14 @@
     <ion-header>
       <ion-toolbar>
         <ion-title>
-          <span class="brand-mark">CF</span>
+          <img class="brand-mark" src="/campusfix-mark.svg" alt="" />
           <span class="brand-name">CampusFix</span>
         </ion-title>
         <ion-buttons slot="end">
+          <ion-button v-if="installPromptAvailable" @click="installApp">
+            <ion-icon slot="start" :icon="downloadOutline" />
+            <span class="install-label">Install app</span>
+          </ion-button>
           <ion-button router-link="/profile" aria-label="Profile">
             <ion-icon :icon="personCircleOutline" />
           </ion-button>
@@ -66,6 +70,7 @@ import {
   barChartOutline,
   businessOutline,
   constructOutline,
+  downloadOutline,
   fileTrayFullOutline,
   homeOutline,
   logOutOutline,
@@ -77,6 +82,7 @@ import {
 } from 'ionicons/icons';
 import { useSessionStore } from '@/stores/session';
 import { logout } from '@/services/auth';
+import { canInstallPwa as installPromptAvailable, promptPwaInstall } from '@/utils/pwa';
 
 defineProps<{ title: string; subtitle?: string }>();
 
@@ -133,20 +139,21 @@ async function confirmLogout() {
   });
   await alert.present();
 }
+
+async function installApp() {
+  try {
+    await promptPwaInstall();
+  } catch (error) {
+    console.error('CampusFix could not open the browser install prompt.', error);
+  }
+}
 </script>
 
 <style scoped>
 .brand-mark {
-  display: inline-grid;
   width: 36px;
   height: 36px;
   margin-right: 11px;
-  place-items: center;
-  border-radius: 11px;
-  color: white;
-  background: var(--ion-color-primary);
-  font-size: 13px;
-  font-weight: 800;
   vertical-align: middle;
 }
 
@@ -155,6 +162,8 @@ async function confirmLogout() {
   font-weight: 750;
   vertical-align: middle;
 }
+
+.install-label { font-size: 12px; font-weight: 650; }
 
 .mobile-nav {
   background: var(--ion-background-color);

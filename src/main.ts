@@ -4,6 +4,7 @@ import router from './router';
 
 import { IonicVue } from '@ionic/vue';
 import { createPinia } from 'pinia';
+import '@/utils/pwa';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/vue/css/core.css';
@@ -39,3 +40,10 @@ const app = createApp(App)
 router.isReady().then(() => {
   app.mount('#app');
 });
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js')
+      .catch((error: unknown) => console.error('CampusFix offline app setup failed.', error));
+  });
+}

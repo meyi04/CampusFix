@@ -36,6 +36,29 @@ Open the URL printed by Vite. Stop and restart the development server after chan
 
 The Android platform project is already present in `android/`. If it is absent in a fresh checkout, create it with `npx cap add android`.
 
+To build an Android APK, install Android Studio with SDK Platform 36 and Build-Tools 36.0.0, configure Firebase in `.env.local`, then run:
+
+```powershell
+npm run android:apk
+```
+
+The installable debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. Transfer it to the phone, allow installation from that source when prompted, and open the APK. Debug APKs are for direct testing/distribution; publishing through Google Play requires a release build signed with your own protected upload key.
+
+### Build and host the web app
+
+Firebase web configuration is embedded in the app at build time. Before building for Firebase Hosting, provide the real `VITE_FIREBASE_*` values from the Firebase Console in `.env.local` (or configure them as environment variables in your CI build), then build and deploy:
+
+```powershell
+npm run build
+firebase deploy --only hosting --project YOUR_FIREBASE_PROJECT_ID
+```
+
+Do not deploy a `dist` folder built before Firebase configuration was available. In GitHub Actions or another CI provider, add the Firebase values to that provider's build environment; a developer's ignored `.env.local` file is not automatically available to the hosted build. After changing any `VITE_*` values, rebuild and redeploy.
+
+### Install from a browser
+
+CampusFix is a Progressive Web App and must be served from HTTPS (Firebase Hosting already provides HTTPS). On Android, open the hosted site in Chrome and choose **Install app** from the app header or browser menu. On desktop Chrome or Edge, use the install icon in the address bar or the browser menu. On iPhone/iPad, open the site in Safari, tap **Share**, then **Add to Home Screen**. The app shell and static assets can load offline; authentication, reports, and other live Firebase data still require an internet connection.
+
 ## Firebase setup
 
 1. Create a Firebase project and register a **Web app** in Firebase Console.

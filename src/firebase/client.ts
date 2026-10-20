@@ -15,7 +15,7 @@ const requiredConfigKeys = Object.entries(config)
   .map(([key]) => key);
 
 export const firebaseConfigurationError = requiredConfigKeys.length
-  ? `Firebase configuration is missing: ${requiredConfigKeys.join(', ')}. Copy .env.example to .env.local and enter your Firebase web app values.`
+  ? `Firebase configuration is missing: ${requiredConfigKeys.join(', ')}.`
   : null;
 
 const firebaseApp = firebaseConfigurationError
@@ -28,7 +28,8 @@ export const auth = firebaseApp ? getAuth(firebaseApp) : null;
 export const db = firebaseApp ? getFirestore(firebaseApp) : null;
 
 if (
-  import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true'
+  import.meta.env.DEV
+  && import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true'
   && auth
   && db
 ) {

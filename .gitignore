@@ -26,6 +26,7 @@ npm-debug.log*
 !/.vscode/extensions.json
 /coverage
 /dist
+.firebase/
 /node_modules
 /functions/node_modules
 /functions/lib

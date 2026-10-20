@@ -2,13 +2,17 @@
   <ion-page>
     <ion-content class="setup-content">
       <section class="setup-card">
-        <div class="brand-mark">CF</div>
+        <img class="brand-mark" src="/campusfix-mark.svg" alt="CampusFix" />
         <p class="eyebrow">MINDSORO STATE UNIVERSITY</p>
         <template v-if="firebaseConfigurationError">
           <h1>Connect CampusFix to Firebase</h1>
           <p>Authentication, facility reports, and live updates are ready to use once this app is connected to your Firebase project.</p>
           <pre>{{ firebaseConfigurationError }}</pre>
-          <p>Copy <code>.env.example</code> to <code>.env.local</code>, fill in your Firebase web app configuration, then restart the development server.</p>
+          <template v-if="isProductionBuild">
+            <p>The hosted site was built without its Firebase web app settings. Add the <code>VITE_FIREBASE_*</code> values from Firebase Console to the hosting build environment, rebuild the app, and deploy the new <code>dist</code> folder.</p>
+            <p class="setup-hint">For Firebase CLI hosting, put the values in a local <code>.env.local</code> before running <code>npm run build</code> and <code>firebase deploy --only hosting</code>. For GitHub Actions or another CI host, configure them as build environment variables or secrets.</p>
+          </template>
+          <p v-else>Copy <code>.env.example</code> to <code>.env.local</code>, fill in your Firebase web app configuration, then restart the development server.</p>
         </template>
         <template v-else>
           <h1>Account profile needs attention</h1>
@@ -42,6 +46,7 @@ import { useSessionStore } from '@/stores/session';
 
 const router = useRouter();
 const session = useSessionStore();
+const isProductionBuild = import.meta.env.PROD;
 const profileError = computed(() => session.error ?? 'The profile lookup did not return an account. Check the browser console for details.');
 const actionError = ref('');
 const busy = ref(false);
@@ -76,7 +81,7 @@ onMounted(async () => {
 <style scoped>
 .setup-content { --background: var(--campus-surface); }
 .setup-card { width: min(560px, calc(100% - 32px)); margin: 12vh auto; padding: 34px; border: 1px solid var(--ion-color-step-150); border-radius: 12px; background: var(--ion-background-color); }
-.brand-mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px; color: white; background: var(--ion-color-primary); font-weight: 800; }
+.brand-mark { display: block; width: 42px; height: 42px; border-radius: 11px; }
 .eyebrow { margin-top: 28px; color: var(--ion-color-primary); font-size: 11px; font-weight: 750; letter-spacing: .12em; }
 h1 { margin: 8px 0; font-size: 28px; }
 p { color: var(--ion-color-medium-shade); line-height: 1.6; }

@@ -1,4 +1,4 @@
-package io.ionic.starter;
+package campus.fix.app;
 
 import com.getcapacitor.BridgeActivity;
 

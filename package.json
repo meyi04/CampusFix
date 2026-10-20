@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
+    "android:apk": "npm run build && cap sync android && cd android && gradlew assembleDebug",
     "preview": "vite preview",
     "test:e2e": "cypress run",
     "test:unit": "vitest tests/unit",
