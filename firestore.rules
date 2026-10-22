@@ -460,21 +460,98 @@
       match /announcements/{announcementId} {
         allow read: if activeUser() && resource.data.active == true;
         allow create: if isAdmin()
-          && request.resource.data.keys().hasOnly(['title', 'body', 'authorUid', 'active', 'createdAt', 'createdAuditId'])
+          && request.resource.data.keys().hasOnly([
+            'title', 'body', 'authorUid', 'authorName', 'active',
+            'createdAt', 'createdAuditId', 'imagePhotoId', 'imageContentType', 'imageChunkCount'
+          ])
           && request.resource.data.authorUid == request.auth.uid
           && request.resource.data.title is string
           && request.resource.data.title.size() >= 3
           && request.resource.data.body is string
           && request.resource.data.body.size() >= 5
+          && request.resource.data.get('imagePhotoId', '') is string
+          && request.resource.data.get('imageContentType', '') is string
+          && request.resource.data.get('imageChunkCount', 0) is int
+          && (
+            !('imagePhotoId' in request.resource.data.keys())
+            || (
+              request.resource.data.imagePhotoId.size() > 0
+              && request.resource.data.imageContentType in ['image/jpeg', 'image/png', 'image/webp']
+              && request.resource.data.imageChunkCount >= 1
+              && request.resource.data.imageChunkCount <= 12
+            )
+          )
+          && ('imagePhotoId' in request.resource.data.keys()) == ('imageContentType' in request.resource.data.keys())
+          && ('imagePhotoId' in request.resource.data.keys()) == ('imageChunkCount' in request.resource.data.keys())
           && request.resource.data.active == true
           && request.resource.data.createdAt == request.time
           && linkedAudit(request.resource.data.createdAuditId, 'announcement.created', 'targetId', announcementId);
-        allow update: if isAdmin()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'lastAuditId'])
-          && request.resource.data.active == false
-          && resource.data.active == true
-          && linkedAudit(request.resource.data.lastAuditId, 'announcement.active.changed', 'targetId', announcementId);
+        allow update: if isAdmin() && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'title', 'body', 'editedAt', 'lastAuditId',
+              'imagePhotoId', 'imageContentType', 'imageChunkCount'
+            ])
+            && request.resource.data.active == true
+            && request.resource.data.title is string
+            && request.resource.data.title.size() >= 3
+            && request.resource.data.body is string
+            && request.resource.data.body.size() >= 5
+            && request.resource.data.editedAt == request.time
+            && request.resource.data.get('imagePhotoId', '') is string
+            && request.resource.data.get('imageContentType', '') is string
+            && request.resource.data.get('imageChunkCount', 0) is int
+            && (
+              !('imagePhotoId' in request.resource.data.keys())
+              || (
+                request.resource.data.imagePhotoId.size() > 0
+                && request.resource.data.imageContentType in ['image/jpeg', 'image/png', 'image/webp']
+                && request.resource.data.imageChunkCount >= 1
+                && request.resource.data.imageChunkCount <= 12
+              )
+            )
+            && ('imagePhotoId' in request.resource.data.keys()) == ('imageContentType' in request.resource.data.keys())
+            && ('imagePhotoId' in request.resource.data.keys()) == ('imageChunkCount' in request.resource.data.keys())
+            && linkedAudit(request.resource.data.lastAuditId, 'announcement.updated', 'targetId', announcementId)
+          )
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'lastAuditId'])
+            && request.resource.data.active == false
+            && resource.data.active == true
+            && linkedAudit(request.resource.data.lastAuditId, 'announcement.deleted', 'targetId', announcementId)
+          )
+        );
         allow delete: if false;
+      }
+
+      match /announcementPhotos/{photoChunkId} {
+        allow read: if activeUser()
+          && resource.data.announcementId is string
+          && exists(/databases/$(database)/documents/announcements/$(resource.data.announcementId))
+          && get(/databases/$(database)/documents/announcements/$(resource.data.announcementId)).data.active == true;
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly([
+            'announcementId', 'photoId', 'chunkIndex', 'chunkCount', 'contentType', 'data', 'createdAt'
+          ])
+          && request.resource.data.announcementId is string
+          && request.resource.data.photoId is string
+          && request.resource.data.chunkIndex is int
+          && request.resource.data.chunkCount is int
+          && request.resource.data.chunkIndex >= 0
+          && request.resource.data.chunkCount >= 1
+          && request.resource.data.chunkCount <= 12
+          && request.resource.data.chunkIndex < request.resource.data.chunkCount
+          && request.resource.data.contentType in ['image/jpeg', 'image/png', 'image/webp']
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 614400
+          && request.resource.data.createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/announcements/$(request.resource.data.announcementId))
+          && getAfter(/databases/$(database)/documents/announcements/$(request.resource.data.announcementId)).data.active == true
+          && getAfter(/databases/$(database)/documents/announcements/$(request.resource.data.announcementId)).data.imagePhotoId == request.resource.data.photoId
+          && getAfter(/databases/$(database)/documents/announcements/$(request.resource.data.announcementId)).data.imageChunkCount == request.resource.data.chunkCount
+          && getAfter(/databases/$(database)/documents/announcements/$(request.resource.data.announcementId)).data.imageContentType == request.resource.data.contentType;
+        allow update: if false;
+        allow delete: if isAdmin();
       }
 
       match /auditLogs/{logId} {

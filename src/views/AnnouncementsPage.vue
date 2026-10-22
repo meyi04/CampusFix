@@ -6,20 +6,35 @@
           <span class="notice-icon"><ion-icon :icon="megaphoneOutline" /></span>
           <div>
             <p class="section-kicker">COMMUNICATIONS</p>
-            <h2>Publish a campus notice</h2>
+            <h2>{{ editingAnnouncement ? 'Edit campus notice' : 'Publish a campus notice' }}</h2>
             <p>Share a clear, timely update with the campus community.</p>
           </div>
         </div>
         <form @submit.prevent="publish">
           <ion-input v-model="title" label="Headline" label-placement="stacked" placeholder="Write a clear announcement title" :maxlength="120" required />
           <ion-textarea v-model="body" label="Announcement details" label-placement="stacked" placeholder="Include what people need to know, when it takes effect, and who to contact." :auto-grow="true" :maxlength="2000" required />
+          <div class="image-field">
+            <label for="announcement-image">Image <span>(optional, JPEG/PNG/WebP up to 5 MB)</span></label>
+            <input id="announcement-image" ref="imageInput" type="file" accept="image/jpeg,image/png,image/webp" @change="selectImage" />
+            <img v-if="imagePreviewUrl || editingImageUrl && !removeExistingImage" class="image-preview" :src="imagePreviewUrl || editingImageUrl" alt="Announcement image preview" />
+            <button
+              v-if="editingImageUrl && !removeExistingImage && !selectedImage"
+              type="button"
+              class="remove-image"
+              @click="removeExistingImage = true"
+            >
+              Remove current image
+            </button>
+            <span v-if="selectedImage" class="selected-file">{{ selectedImage.name }}</span>
+          </div>
           <div class="publish-footer">
             <p v-if="error" class="error-text" role="alert">{{ error }}</p>
             <span v-else class="editor-hint">Visible to signed-in campus users</span>
             <ion-button type="submit" :disabled="busy || title.trim().length < 3 || body.trim().length < 5">
               <ion-icon slot="start" :icon="megaphoneOutline" />
-              {{ busy ? 'Publishing...' : 'Publish notice' }}
+              {{ busy ? 'Saving...' : editingAnnouncement ? 'Save changes' : 'Publish notice' }}
             </ion-button>
+            <ion-button v-if="editingAnnouncement" type="button" fill="clear" :disabled="busy" @click="cancelEdit">Cancel</ion-button>
           </div>
         </form>
       </section>
@@ -35,7 +50,12 @@
           <time :datetime="dateTime(item.createdAt)">{{ formatDate(item.createdAt) }}</time>
         </div>
         <h3>{{ item.title }}</h3>
+        <img v-if="item.imageUrl" class="notice-image" :src="item.imageUrl" :alt="`Image for ${item.title}`" loading="lazy" />
         <p class="notice-body">{{ item.body }}</p>
+        <div v-if="session.profile?.role === 'admin'" class="notice-actions">
+          <ion-button fill="outline" size="small" :disabled="busy" @click="beginEdit(item)">Edit</ion-button>
+          <ion-button fill="clear" color="danger" size="small" :disabled="busy" @click="confirmDelete(item)">Delete</ion-button>
+        </div>
         <footer class="notice-author">
           <span class="author-avatar">{{ initials(item.authorName) }}</span>
           <span><strong>{{ item.authorName || 'MinSU Facilities Office' }}</strong><small>Official campus communication</small></span>
@@ -52,10 +72,10 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
-import { IonButton, IonIcon, IonInput, IonTextarea } from '@ionic/vue';
+import { alertController, IonButton, IonIcon, IonInput, IonTextarea } from '@ionic/vue';
 import { megaphoneOutline } from 'ionicons/icons';
 import AppShell from '@/components/AppShell.vue';
-import { createAnnouncement, subscribeAnnouncements } from '@/services/campus';
+import { createAnnouncement, deleteAnnouncement, subscribeAnnouncements, updateAnnouncement } from '@/services/campus';
 import { useSessionStore } from '@/stores/session';
 import type { CampusAnnouncement } from '@/models/domain';
 
@@ -63,6 +83,12 @@ const session = useSessionStore();
 const announcements = ref<CampusAnnouncement[]>([]);
 const title = ref('');
 const body = ref('');
+const editingAnnouncement = ref<CampusAnnouncement | null>(null);
+const editingImageUrl = ref('');
+const removeExistingImage = ref(false);
+const selectedImage = ref<File | null>(null);
+const imagePreviewUrl = ref('');
+const imageInput = ref<HTMLInputElement | null>(null);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref('');
@@ -79,21 +105,89 @@ async function publish() {
   busy.value = true;
   error.value = '';
   try {
-    await createAnnouncement(title.value, body.value, session.profile);
-    title.value = '';
-    body.value = '';
+    if (editingAnnouncement.value) {
+      await updateAnnouncement(editingAnnouncement.value, title.value, body.value, session.profile, {
+        imageFile: selectedImage.value ?? undefined,
+        removeImage: removeExistingImage.value,
+      });
+    } else {
+      await createAnnouncement(title.value, body.value, session.profile, selectedImage.value ?? undefined);
+    }
+    cancelEdit();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to publish the announcement.';
   } finally {
     busy.value = false;
   }
 }
+function selectImage(event: Event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  const file = input.files?.[0] ?? null;
+  if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value);
+  selectedImage.value = file;
+  imagePreviewUrl.value = file ? URL.createObjectURL(file) : '';
+  if (file) removeExistingImage.value = false;
+}
+function beginEdit(item: CampusAnnouncement) {
+  editingAnnouncement.value = item;
+  title.value = item.title;
+  body.value = item.body;
+  editingImageUrl.value = item.imageUrl ?? '';
+  removeExistingImage.value = false;
+  selectedImage.value = null;
+  if (imageInput.value) imageInput.value.value = '';
+  if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value);
+  imagePreviewUrl.value = '';
+  error.value = '';
+}
+function cancelEdit() {
+  if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value);
+  editingAnnouncement.value = null;
+  editingImageUrl.value = '';
+  removeExistingImage.value = false;
+  selectedImage.value = null;
+  imagePreviewUrl.value = '';
+  title.value = '';
+  body.value = '';
+  if (imageInput.value) imageInput.value.value = '';
+}
+async function confirmDelete(item: CampusAnnouncement) {
+  const alert = await alertController.create({
+    header: 'Delete announcement?',
+    message: `“${item.title}” will be removed from the campus news feed.`,
+    buttons: [
+      { text: 'Cancel', role: 'cancel' },
+      {
+        text: 'Delete',
+        role: 'confirm',
+        handler: async () => {
+          if (!session.profile || session.profile.role !== 'admin') return;
+          busy.value = true;
+          error.value = '';
+          try {
+            await deleteAnnouncement(item, session.profile);
+            if (editingAnnouncement.value?.id === item.id) cancelEdit();
+          } catch (cause) {
+            error.value = cause instanceof Error ? cause.message : 'Unable to delete the announcement.';
+          } finally {
+            busy.value = false;
+          }
+        },
+      },
+    ],
+  });
+  await alert.present();
+}
 onMounted(async () => {
   await session.initialize();
   if (!session.profile) { error.value = session.error ?? 'Sign in to read announcements.'; loading.value = false; return; }
   unsubscribe = subscribeAnnouncements((items) => { announcements.value = items; loading.value = false; }, (cause) => { error.value = cause.message; loading.value = false; });
 });
-onUnmounted(() => unsubscribe?.());
+onUnmounted(() => {
+  unsubscribe?.();
+  if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value);
+});
 </script>
 
 <style scoped>
@@ -116,7 +210,16 @@ onUnmounted(() => unsubscribe?.());
 .notice-label { color: var(--ion-color-primary); font-size: 9px; font-weight: 800; letter-spacing: .12em; }
 .notice-meta time { color: var(--ion-color-medium); font-size: 11px; }
 .announcement h3 { margin: 14px 0 9px; font-size: clamp(18px, 2.5vw, 22px); line-height: 1.35; letter-spacing: -.02em; }
+.notice-image { display: block; width: 100%; max-height: 390px; margin: 14px 0; border-radius: 11px; object-fit: cover; }
 .notice-body { margin: 0; color: var(--ion-color-medium-shade); font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
+.notice-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 12px; }
+.image-field { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 14px 0; }
+.image-field label { color: var(--ion-text-color); font-size: 13px; font-weight: 600; }
+.image-field label span { color: var(--ion-color-medium); font-size: 11px; font-weight: 400; }
+.image-field input { max-width: 100%; font-size: 12px; }
+.image-preview { width: min(100%, 360px); max-height: 220px; border-radius: 9px; object-fit: cover; }
+.remove-image { padding: 0; border: 0; color: var(--ion-color-danger); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.selected-file { color: var(--ion-color-medium); font-size: 11px; }
 .notice-author { display: flex; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--campus-border); }
 .author-avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; color: var(--ion-color-primary); background: #eaf3ed; font-size: 11px; font-weight: 750; }
 .notice-author > span:last-child { display: grid; gap: 3px; }

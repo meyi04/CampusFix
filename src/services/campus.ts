@@ -1,7 +1,9 @@
 import {
   getDocs,
+  getDoc,
   collection,
   doc,
+  deleteField,
   limit,
   onSnapshot,
   orderBy,
@@ -16,6 +18,7 @@ import {
 import { auth, db } from '@/firebase/client';
 import type { CampusAnnouncement, CampusBuilding, CampusCategory, CampusRoom, UserProfile } from '@/models/domain';
 import { toUserFacingError } from '@/utils/errors';
+import { createPhotoDataUrl, encodePhotoBytes } from '@/utils/firestorePhotos';
 
 function requireDatabase() {
   if (!auth?.currentUser || !db) throw new Error('Sign in and configure Firebase to continue.');
@@ -237,31 +240,179 @@ export function subscribeAnnouncements(
   onError: (error: Error) => void,
 ): Unsubscribe {
   const database = requireDatabase();
-  return onSnapshot(
+  let revision = 0;
+  const unsubscribe = onSnapshot(
     query(collection(database, 'announcements'), where('active', '==', true), orderBy('createdAt', 'desc'), limit(50)),
-    (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as CampusAnnouncement)),
+    (snapshot) => {
+      const currentRevision = ++revision;
+      void Promise.all(snapshot.docs.map(async (item) => {
+        const announcement = { id: item.id, ...item.data() } as CampusAnnouncement;
+        if (!announcement.imagePhotoId || !announcement.imageContentType || !announcement.imageChunkCount) return announcement;
+        const chunks = await Promise.all(Array.from({ length: announcement.imageChunkCount }, async (_, index) => {
+          const photo = await getDoc(doc(database, 'announcementPhotos', `${announcement.imagePhotoId}-${index}`));
+          if (!photo.exists()) throw new Error(`The image for "${announcement.title}" is incomplete.`);
+          const data = photo.data();
+          if (data.photoId !== announcement.imagePhotoId || data.chunkIndex !== index || typeof data.data !== 'string') {
+            throw new Error(`The image for "${announcement.title}" is incomplete.`);
+          }
+          return data.data;
+        }));
+        announcement.imageUrl = createPhotoDataUrl(announcement.imageContentType, chunks);
+        return announcement;
+      })).then((items) => {
+        if (revision === currentRevision) callback(items);
+      }).catch((cause: unknown) => {
+        if (revision === currentRevision) {
+          onError(toUserFacingError(cause, 'Unable to load announcement images.'));
+        }
+      });
+    },
     (error) => onError(toUserFacingError(error, 'Unable to load announcements.')),
   );
+  return () => {
+    revision += 1;
+    unsubscribe();
+  };
 }
 
-export async function createAnnouncement(title: string, body: string, author: UserProfile): Promise<void> {
+export async function createAnnouncement(title: string, body: string, author: UserProfile, imageFile?: File): Promise<void> {
   const database = requireDatabase();
   const batch = writeBatch(database);
   const announcement = doc(collection(database, 'announcements'));
   const audit = doc(collection(database, 'auditLogs'));
+  const image = imageFile ? await encodeAnnouncementImage(imageFile) : undefined;
   batch.set(announcement, {
     title: title.trim(),
     body: body.trim(),
     authorUid: author.uid,
     authorName: author.fullName,
+    ...image?.metadata,
     active: true,
     createdAt: serverTimestamp(),
     createdAuditId: audit.id,
   });
+  if (image) addAnnouncementImageChunks(batch, announcement.id, image.photoId, image.contentType, image.chunks);
   batch.set(audit, {
     actorUid: author.uid,
     actorName: author.fullName,
     action: 'announcement.created',
+    targetId: announcement.id,
+    createdAt: serverTimestamp(),
+  });
+  await batch.commit();
+}
+
+const ANNOUNCEMENT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+async function encodeAnnouncementImage(file: File): Promise<{
+  photoId: string;
+  contentType: string;
+  chunks: string[];
+  metadata: { imagePhotoId: string; imageContentType: string; imageChunkCount: number };
+}> {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    throw new Error('Choose a JPEG, PNG, or WebP image.');
+  }
+  if (file.size > ANNOUNCEMENT_IMAGE_MAX_BYTES) throw new Error('The image must be 5 MB or smaller.');
+  if (!file.size) throw new Error('Choose an image that is not empty.');
+  const photoId = crypto.randomUUID();
+  const chunks = encodePhotoBytes(new Uint8Array(await file.arrayBuffer()));
+  return {
+    photoId,
+    contentType: file.type,
+    chunks,
+    metadata: {
+      imagePhotoId: photoId,
+      imageContentType: file.type,
+      imageChunkCount: chunks.length,
+    },
+  };
+}
+
+function addAnnouncementImageChunks(
+  batch: ReturnType<typeof writeBatch>,
+  announcementId: string,
+  photoId: string,
+  contentType: string,
+  chunks: string[],
+) {
+  const database = requireDatabase();
+  chunks.forEach((data, chunkIndex) => {
+    batch.set(doc(database, 'announcementPhotos', `${photoId}-${chunkIndex}`), {
+      announcementId,
+      photoId,
+      chunkIndex,
+      chunkCount: chunks.length,
+      contentType,
+      data,
+      createdAt: serverTimestamp(),
+    });
+  });
+}
+
+function removeAnnouncementImageChunks(batch: ReturnType<typeof writeBatch>, photoId: string, count: number) {
+  const database = requireDatabase();
+  for (let index = 0; index < count; index += 1) {
+    batch.delete(doc(database, 'announcementPhotos', `${photoId}-${index}`));
+  }
+}
+
+export async function updateAnnouncement(
+  announcement: CampusAnnouncement,
+  title: string,
+  body: string,
+  author: UserProfile,
+  options: { imageFile?: File; removeImage?: boolean },
+): Promise<void> {
+  const database = requireDatabase();
+  const batch = writeBatch(database);
+  const audit = doc(collection(database, 'auditLogs'));
+  const image = options.imageFile ? await encodeAnnouncementImage(options.imageFile) : undefined;
+  const update: Record<string, unknown> = {
+    title: title.trim(),
+    body: body.trim(),
+    editedAt: serverTimestamp(),
+    lastAuditId: audit.id,
+  };
+  if (image) {
+    Object.assign(update, image.metadata);
+  } else if (options.removeImage) {
+    update.imagePhotoId = deleteField();
+    update.imageContentType = deleteField();
+    update.imageChunkCount = deleteField();
+  }
+  if (image) {
+    addAnnouncementImageChunks(batch, announcement.id, image.photoId, image.contentType, image.chunks);
+  }
+  if ((image || options.removeImage) && announcement.imagePhotoId && announcement.imageChunkCount) {
+    removeAnnouncementImageChunks(batch, announcement.imagePhotoId, announcement.imageChunkCount);
+  }
+  batch.update(doc(database, 'announcements', announcement.id), update);
+  batch.set(audit, {
+    actorUid: author.uid,
+    actorName: author.fullName,
+    action: 'announcement.updated',
+    targetId: announcement.id,
+    createdAt: serverTimestamp(),
+  });
+  await batch.commit();
+}
+
+export async function deleteAnnouncement(announcement: CampusAnnouncement, author: UserProfile): Promise<void> {
+  const database = requireDatabase();
+  const batch = writeBatch(database);
+  const audit = doc(collection(database, 'auditLogs'));
+  batch.update(doc(database, 'announcements', announcement.id), {
+    active: false,
+    lastAuditId: audit.id,
+  });
+  if (announcement.imagePhotoId && announcement.imageChunkCount) {
+    removeAnnouncementImageChunks(batch, announcement.imagePhotoId, announcement.imageChunkCount);
+  }
+  batch.set(audit, {
+    actorUid: author.uid,
+    actorName: author.fullName,
+    action: 'announcement.deleted',
     targetId: announcement.id,
     createdAt: serverTimestamp(),
   });

@@ -2,19 +2,27 @@
   <ion-page>
     <ion-header>
       <ion-toolbar>
-        <ion-title>
+        <div slot="start" class="brand">
           <img class="brand-mark" src="/campusfix-mark.svg" alt="" />
           <span class="brand-name">CampusFix</span>
-        </ion-title>
+        </div>
         <ion-buttons slot="end">
-          <ion-button v-if="installPromptAvailable" @click="installApp">
+          <ion-button v-if="installPromptAvailable" title="Install" aria-label="Install app" @click="installApp">
             <ion-icon slot="start" :icon="downloadOutline" />
             <span class="install-label">Install app</span>
           </ion-button>
-          <ion-button router-link="/profile" aria-label="Profile">
+          <ion-button v-if="session.profile" router-link="/notifications" title="Updates" aria-label="Updates">
+            <ion-icon :icon="notificationsOutline" />
+          </ion-button>
+          <template v-if="session.profile?.role === 'admin'">
+            <ion-button router-link="/announcements" title="News" aria-label="News">
+              <ion-icon :icon="megaphoneOutline" />
+            </ion-button>
+          </template>
+          <ion-button router-link="/profile" title="Profile" aria-label="Profile">
             <ion-icon :icon="personCircleOutline" />
           </ion-button>
-          <ion-button aria-label="Sign out" @click="confirmLogout">
+          <ion-button title="Sign out" aria-label="Sign out" @click="confirmLogout">
             <ion-icon :icon="logOutOutline" />
           </ion-button>
         </ion-buttons>
@@ -62,7 +70,6 @@ import {
   IonHeader,
   IonIcon,
   IonPage,
-  IonTitle,
   IonToolbar,
 } from '@ionic/vue';
 import {
@@ -98,15 +105,12 @@ const navigation = computed(() => {
       { label: 'Directory', to: '/admin/catalog', icon: businessOutline },
       { label: 'Users', to: '/admin/users', icon: peopleOutline },
       { label: 'Audit', to: '/admin/audit', icon: readerOutline },
-      { label: 'Updates', to: '/notifications', icon: notificationsOutline },
-      { label: 'News', to: '/announcements', icon: megaphoneOutline },
     ];
   }
   const items = [
     ...(role === 'maintenance' ? [] : [{ label: 'Home', to: '/home', icon: homeOutline }]),
     { label: role === 'maintenance' ? 'Work' : 'Reports', to: role === 'maintenance' ? '/maintenance' : '/reports', icon: role === 'maintenance' ? constructOutline : fileTrayFullOutline },
     ...(role === 'student' || role === 'faculty' ? [{ label: 'New report', to: '/reports/new', icon: addCircleOutline }] : []),
-    { label: 'Updates', to: '/notifications', icon: notificationsOutline },
     { label: 'News', to: '/announcements', icon: megaphoneOutline },
   ];
   return items;
@@ -153,14 +157,17 @@ async function installApp() {
 .brand-mark {
   width: 36px;
   height: 36px;
-  margin-right: 11px;
-  vertical-align: middle;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
 }
 
 .brand-name {
   font-size: 18px;
   font-weight: 750;
-  vertical-align: middle;
 }
 
 .install-label { font-size: 12px; font-weight: 650; }

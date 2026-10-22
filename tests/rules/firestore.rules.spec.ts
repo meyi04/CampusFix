@@ -9,6 +9,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -405,5 +406,110 @@ describe('Firestore access control', () => {
     const unrelated = authenticatedStorage('reporter-3', 'student');
     await assertSucceeds(getBytes(storageRef(maintenance, 'reports/report-2/reporter-1/evidence.png')));
     await assertFails(getBytes(storageRef(unrelated, 'reports/report-2/reporter-1/evidence.png')));
+  });
+
+  test('administrators can create, edit, and soft-delete announcements with linked audit records', async () => {
+    const admin = authenticated('admin-1', 'admin');
+    const createBatch = writeBatch(admin);
+    createBatch.set(doc(admin, 'announcements', 'notice-1'), {
+      title: 'Campus maintenance notice',
+      body: 'The library will be closed this afternoon.',
+      authorUid: 'admin-1',
+      authorName: 'Administrator One',
+      active: true,
+      createdAt: serverTimestamp(),
+      createdAuditId: 'notice-create-audit',
+      imagePhotoId: 'notice-photo-1',
+      imageContentType: 'image/png',
+      imageChunkCount: 1,
+    });
+    createBatch.set(doc(admin, 'announcementPhotos', 'notice-photo-1-0'), {
+      announcementId: 'notice-1',
+      photoId: 'notice-photo-1',
+      chunkIndex: 0,
+      chunkCount: 1,
+      contentType: 'image/png',
+      data: 'YQ==',
+      createdAt: serverTimestamp(),
+    });
+    createBatch.set(doc(admin, 'auditLogs', 'notice-create-audit'), {
+      actorUid: 'admin-1',
+      actorName: 'Administrator One',
+      action: 'announcement.created',
+      targetId: 'notice-1',
+      createdAt: serverTimestamp(),
+    });
+    await assertSucceeds(createBatch.commit());
+    await assertSucceeds(getDoc(doc(authenticated('reporter-1', 'student'), 'announcementPhotos', 'notice-photo-1-0')));
+    await assertFails(setDoc(doc(authenticated('reporter-1', 'student'), 'announcementPhotos', 'unauthorized-photo-0'), {
+      announcementId: 'notice-1',
+      photoId: 'unauthorized-photo',
+      chunkIndex: 0,
+      chunkCount: 1,
+      contentType: 'image/png',
+      data: 'YQ==',
+      createdAt: serverTimestamp(),
+    }));
+
+    const updateBatch = writeBatch(admin);
+    updateBatch.update(doc(admin, 'announcements', 'notice-1'), {
+      title: 'Updated campus maintenance notice',
+      body: 'The library will be closed this afternoon for maintenance.',
+      imagePhotoId: 'notice-photo-2',
+      imageContentType: 'image/png',
+      imageChunkCount: 1,
+      editedAt: serverTimestamp(),
+      lastAuditId: 'notice-update-audit',
+    });
+    updateBatch.set(doc(admin, 'announcementPhotos', 'notice-photo-2-0'), {
+      announcementId: 'notice-1',
+      photoId: 'notice-photo-2',
+      chunkIndex: 0,
+      chunkCount: 1,
+      contentType: 'image/png',
+      data: 'Yg==',
+      createdAt: serverTimestamp(),
+    });
+    updateBatch.delete(doc(admin, 'announcementPhotos', 'notice-photo-1-0'));
+    updateBatch.set(doc(admin, 'auditLogs', 'notice-update-audit'), {
+      actorUid: 'admin-1',
+      actorName: 'Administrator One',
+      action: 'announcement.updated',
+      targetId: 'notice-1',
+      createdAt: serverTimestamp(),
+    });
+    await assertSucceeds(updateBatch.commit());
+
+    const removeImageBatch = writeBatch(admin);
+    removeImageBatch.update(doc(admin, 'announcements', 'notice-1'), {
+      imagePhotoId: deleteField(),
+      imageContentType: deleteField(),
+      imageChunkCount: deleteField(),
+      editedAt: serverTimestamp(),
+      lastAuditId: 'notice-remove-image-audit',
+    });
+    removeImageBatch.delete(doc(admin, 'announcementPhotos', 'notice-photo-2-0'));
+    removeImageBatch.set(doc(admin, 'auditLogs', 'notice-remove-image-audit'), {
+      actorUid: 'admin-1',
+      actorName: 'Administrator One',
+      action: 'announcement.updated',
+      targetId: 'notice-1',
+      createdAt: serverTimestamp(),
+    });
+    await assertSucceeds(removeImageBatch.commit());
+
+    const deleteBatch = writeBatch(admin);
+    deleteBatch.update(doc(admin, 'announcements', 'notice-1'), {
+      active: false,
+      lastAuditId: 'notice-delete-audit',
+    });
+    deleteBatch.set(doc(admin, 'auditLogs', 'notice-delete-audit'), {
+      actorUid: 'admin-1',
+      actorName: 'Administrator One',
+      action: 'announcement.deleted',
+      targetId: 'notice-1',
+      createdAt: serverTimestamp(),
+    });
+    await assertSucceeds(deleteBatch.commit());
   });
 });

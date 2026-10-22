@@ -102,4 +102,8 @@ export interface CampusAnnouncement {
   authorName?: string;
   createdAt: Timestamp;
   active: boolean;
+  imageUrl?: string;
+  imagePhotoId?: string;
+  imageContentType?: string;
+  imageChunkCount?: number;
 }

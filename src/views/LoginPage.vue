@@ -4,7 +4,7 @@
       <main class="auth-layout">
         <section class="auth-intro">
           <div class="brand-mark">CF</div>
-          <p class="eyebrow">MINDSORO STATE UNIVERSITY</p>
+          <p class="eyebrow">MINDORO STATE UNIVERSITY</p>
           <h1>Better spaces.<br />Better campus.</h1>
           <p>Report facility issues and follow every repair from submission to resolution.</p>
           <div class="intro-foot">A campus service for the MinSU community</div>
@@ -14,7 +14,26 @@
           <p class="muted">Sign in with your university account.</p>
           <form @submit.prevent="submit">
             <ion-input v-model="email" label="Institutional email" label-placement="stacked" type="email" autocomplete="email" required />
-            <ion-input v-model="password" label="Password" label-placement="stacked" type="password" autocomplete="current-password" required />
+            <div class="password-field">
+              <ion-input
+                v-model="password"
+                label="Password"
+                label-placement="stacked"
+                :type="showPassword ? 'text' : 'password'"
+                autocomplete="current-password"
+                required
+              />
+              <ion-button
+                type="button"
+                fill="clear"
+                class="password-toggle"
+                :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                :aria-pressed="showPassword"
+                @click="showPassword = !showPassword"
+              >
+                <ion-icon :icon="showPassword ? eyeOffOutline : eyeOutline" aria-hidden="true" />
+              </ion-button>
+            </div>
             <p v-if="error" class="error-text" role="alert">{{ error }}</p>
             <ion-button expand="block" type="submit" :disabled="busy" class="submit-button">
               {{ busy ? 'Signing in...' : 'Sign in' }}
@@ -31,12 +50,14 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { IonButton, IonContent, IonInput, IonPage } from '@ionic/vue';
+import { IonButton, IonContent, IonIcon, IonInput, IonPage } from '@ionic/vue';
+import { eyeOffOutline, eyeOutline } from 'ionicons/icons';
 import { login } from '@/services/auth';
 import router from '@/router';
 
 const email = ref('');
 const password = ref('');
+const showPassword = ref(false);
 const busy = ref(false);
 const error = ref('');
 
@@ -82,6 +103,9 @@ h1 { margin: 0; font-size: clamp(34px, 5vw, 50px); line-height: 1.12; }
 .auth-form h2 { margin-bottom: 4px; font-size: 28px; }
 .muted { color: var(--ion-color-medium); }
 ion-input { margin: 22px 0; --padding-start: 0; }
+.password-field { position: relative; }
+.password-field ion-input { --padding-end: 60px; }
+.password-toggle { position: absolute; z-index: 2; right: 0; bottom: 16px; margin: 0; --padding-start: 8px; --padding-end: 8px; font-size: 18px; }
 .submit-button { margin-top: 24px; }
 .forgot-link { display: block; margin: 16px 0 24px; text-align: right; color: var(--ion-color-primary); font-size: 13px; text-decoration: none; }
 .auth-divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--ion-color-medium); font-size: 12px; }
