@@ -22,7 +22,7 @@
           <p v-if="session.error?.includes('unavailable')">
             Registration normally creates this profile automatically. If this is an older account, ask the administrator to create the matching <code>users/{{ session.user?.uid }}</code> document in the same Firebase project's Firestore.
           </p>
-          <p v-else-if="session.error?.includes('permission-denied') || session.error?.includes('insufficient permissions')">
+          <p v-else-if="(session.error ?? '').toLowerCase().includes('permission-denied') || (session.error ?? '').toLowerCase().includes('missing or insufficient permissions') || (session.error ?? '').toLowerCase().includes('insufficient permissions')">
             Ask your administrator to confirm this app points to the correct Firebase project and that the Firestore rules are deployed.
           </p>
           <p v-else-if="!session.error?.includes('unavailable')">

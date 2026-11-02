@@ -7,10 +7,6 @@
           <span class="brand-name">CampusFix</span>
         </div>
         <ion-buttons slot="end">
-          <ion-button v-if="installPromptAvailable" title="Install" aria-label="Install app" @click="installApp">
-            <ion-icon slot="start" :icon="downloadOutline" />
-            <span class="install-label">Install app</span>
-          </ion-button>
           <ion-button v-if="session.profile" router-link="/notifications" title="Updates" aria-label="Updates">
             <ion-icon :icon="notificationsOutline" />
           </ion-button>
@@ -77,7 +73,6 @@ import {
   barChartOutline,
   businessOutline,
   constructOutline,
-  downloadOutline,
   fileTrayFullOutline,
   homeOutline,
   logOutOutline,
@@ -89,7 +84,6 @@ import {
 } from 'ionicons/icons';
 import { useSessionStore } from '@/stores/session';
 import { logout } from '@/services/auth';
-import { canInstallPwa as installPromptAvailable, promptPwaInstall } from '@/utils/pwa';
 
 defineProps<{ title: string; subtitle?: string }>();
 
@@ -143,14 +137,6 @@ async function confirmLogout() {
   });
   await alert.present();
 }
-
-async function installApp() {
-  try {
-    await promptPwaInstall();
-  } catch (error) {
-    console.error('CampusFix could not open the browser install prompt.', error);
-  }
-}
 </script>
 
 <style scoped>
@@ -163,14 +149,13 @@ async function installApp() {
   display: flex;
   align-items: center;
   gap: 11px;
+  margin-inline-start: 12px;
 }
 
 .brand-name {
   font-size: 18px;
   font-weight: 750;
 }
-
-.install-label { font-size: 12px; font-weight: 650; }
 
 .mobile-nav {
   background: var(--ion-background-color);
@@ -180,9 +165,9 @@ async function installApp() {
 
 .nav-items {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 4px 6px;
+  flex-wrap: nowrap;
+  justify-content: space-around;
+  gap: 0;
   width: 100%;
   max-width: 920px;
   margin: auto;
@@ -192,18 +177,20 @@ async function installApp() {
 .nav-item {
   display: flex;
   box-sizing: border-box;
-  flex: 0 0 76px;
-  width: 76px;
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
   min-height: 42px;
-  padding: 3px 7px;
+  padding: 3px 1px;
   color: var(--ion-color-medium);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .nav-item ion-icon {
@@ -227,7 +214,7 @@ async function installApp() {
     padding: 9px 28px;
   }
   .nav-item {
-    flex-basis: auto;
+    flex: 0 0 auto;
     width: auto;
     flex-direction: row;
     gap: 8px;

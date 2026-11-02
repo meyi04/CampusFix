@@ -1,5 +1,8 @@
 <template>
-  <AppShell :title="session.profile?.role === 'maintenance' ? 'Assigned work orders' : 'Facility reports'" subtitle="Follow a report for the latest maintenance updates.">
+  <AppShell
+    :title="session.profile?.role === 'maintenance' ? 'Assigned work orders' : session.profile?.role === 'faculty' ? 'Department facility reports' : 'Facility reports'"
+    :subtitle="session.profile?.role === 'faculty' ? `Reports submitted by faculty in ${session.profile.department}, including your own.` : 'Follow a report for the latest maintenance updates.'"
+  >
     <div v-if="error" class="error-state" role="alert">{{ error }}</div>
     <div v-if="loading" class="loading-state" role="status">Loading reports...</div>
     <section v-if="!loading && reports.length" class="filters-panel" aria-label="Filter reports">
@@ -30,6 +33,13 @@
             <option v-for="building in buildings" :key="building" :value="building">{{ building }}</option>
           </select>
         </label>
+        <label v-if="session.profile?.role === 'admin'"><span>Response request</span>
+          <select v-model="responseRequestFilter">
+            <option value="">All requests</option>
+            <option value="requested">Immediate response requested</option>
+            <option value="not-requested">No immediate request</option>
+          </select>
+        </label>
         <ion-button v-if="hasFilters" class="clear-button" fill="clear" @click="clearFilters">Clear filters</ion-button>
       </div>
     </section>
@@ -50,6 +60,11 @@
           <span class="priority" :class="report.priority.toLowerCase()">{{ report.priority }} priority</span>
         </div>
         <h2>{{ report.title }}</h2>
+        <p v-if="report.immediateResponseRequested || report.preferredStaffName" class="request-note">
+          <template v-if="report.immediateResponseRequested">Immediate response requested</template>
+          <template v-else>Preferred staff requested</template>
+          <template v-if="report.preferredStaffName"> · {{ report.preferredStaffName }}</template>
+        </p>
         <p>{{ report.buildingName }}<template v-if="report.room"> · {{ report.room }}</template> · {{ report.category }}</p>
         <div class="report-bottom"><span>Reported by {{ report.reporterName }}</span><span>{{ formatDate(report.createdAt) }}</span></div>
       </router-link>
@@ -65,9 +80,8 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { IonButton } from '@ionic/vue';
 import AppShell from '@/components/AppShell.vue';
 import { useSessionStore } from '@/stores/session';
-import { getReportsPage, REPORT_PAGE_SIZE, subscribeReports } from '@/services/reports';
+import { getReportsPage, subscribeReports, type ReportsPageCursor } from '@/services/reports';
 import type { FacilityReport, ReportPriority, ReportStatus } from '@/models/domain';
-import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 
 const session = useSessionStore();
 const loading = ref(true);
@@ -76,13 +90,14 @@ const loadingMore = ref(false);
 const hasMore = ref(false);
 const latestReports = ref<FacilityReport[]>([]);
 const olderReports = ref<FacilityReport[]>([]);
-let cursor: QueryDocumentSnapshot<DocumentData> | undefined;
+let cursor: ReportsPageCursor | undefined;
 const mergedReports = () => [...latestReports.value, ...olderReports.value];
 const reports = ref<FacilityReport[]>([]);
 const searchText = ref('');
 const statusFilter = ref('');
 const priorityFilter = ref('');
 const buildingFilter = ref('');
+const responseRequestFilter = ref('');
 const reportStatuses: ReportStatus[] = ['Submitted', 'Under Review', 'Approved', 'Assigned', 'In Progress', 'Pending Verification', 'Resolved', 'Closed', 'Rejected', 'Needs Clarification', 'Reopened'];
 const reportPriorities: ReportPriority[] = ['Low', 'Normal', 'High', 'Urgent'];
 const buildings = computed(() => [...new Set(reports.value.map((report) => report.buildingName).filter(Boolean))].sort((a, b) => a.localeCompare(b)));
@@ -94,10 +109,14 @@ const filteredReports = computed(() => {
     return matchesSearch
       && (!statusFilter.value || report.status === statusFilter.value)
       && (!priorityFilter.value || report.priority === priorityFilter.value)
-      && (!buildingFilter.value || report.buildingName === buildingFilter.value);
+      && (!buildingFilter.value || report.buildingName === buildingFilter.value)
+      && (!responseRequestFilter.value
+        || (responseRequestFilter.value === 'requested'
+          ? report.immediateResponseRequested === true
+          : report.immediateResponseRequested !== true));
   });
 });
-const hasFilters = computed(() => Boolean(searchText.value || statusFilter.value || priorityFilter.value || buildingFilter.value));
+const hasFilters = computed(() => Boolean(searchText.value || statusFilter.value || priorityFilter.value || buildingFilter.value || responseRequestFilter.value));
 let unsubscribe: (() => void) | undefined;
 
 function clearFilters() {
@@ -105,6 +124,7 @@ function clearFilters() {
   statusFilter.value = '';
   priorityFilter.value = '';
   buildingFilter.value = '';
+  responseRequestFilter.value = '';
 }
 
 function formatDate(value: FacilityReport['createdAt']) {
@@ -122,7 +142,7 @@ async function loadMore() {
     olderReports.value = [...olderReports.value, ...page.reports.filter((report) => !known.has(report.id))];
     reports.value = mergedReports();
     cursor = page.cursor;
-    hasMore.value = page.reports.length === REPORT_PAGE_SIZE;
+    hasMore.value = page.hasMore;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to load older reports.';
   } finally {
@@ -138,7 +158,7 @@ onMounted(async () => {
     latestReports.value = firstPage.reports;
     reports.value = firstPage.reports;
     cursor = firstPage.cursor;
-    hasMore.value = firstPage.reports.length === REPORT_PAGE_SIZE;
+    hasMore.value = firstPage.hasMore;
     loading.value = false;
     unsubscribe = subscribeReports(session.profile, (items) => {
       latestReports.value = items;
@@ -168,6 +188,7 @@ onUnmounted(() => unsubscribe?.());
 .report-top, .report-bottom { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .report-card h2 { margin: 15px 0 6px; font-size: 18px; letter-spacing: -.01em; }
 .report-card p { margin: 0 0 20px; color: var(--ion-color-medium); font-size: 12px; }
+.report-card p.request-note { margin: -10px 0 13px; color: #8c332e; font-size: 11px; font-weight: 650; }
 .report-bottom { color: var(--ion-color-medium); font-size: 10px; }
 .status-chip { padding: 5px 8px; border-radius: 20px; color: #69501c; background: #fff4d6; font-size: 10px; }
 .priority { color: var(--ion-color-medium); font-size: 10px; }

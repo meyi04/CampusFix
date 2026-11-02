@@ -46,6 +46,22 @@
         <p v-if="locationError" class="error-text">{{ locationError }}</p>
       </section>
 
+      <section v-if="session.profile?.role === 'faculty'" class="form-panel faculty-request">
+        <h2>Faculty response request</h2>
+        <p class="muted">Your report will be shared with faculty in {{ session.profile.department }}. You can ask administrators to prioritize the response and suggest a maintenance staff member.</p>
+        <ion-checkbox v-model="immediateResponseRequested" label-placement="end">
+          Request an immediate response
+        </ion-checkbox>
+        <ion-input
+          v-model="preferredStaffName"
+          label="Preferred maintenance staff"
+          label-placement="stacked"
+          placeholder="Enter a staff member's name"
+          :maxlength="100"
+        />
+        <p class="request-hint">This is a request, not a direct assignment or a guaranteed response time. An administrator reviews and assigns the work.</p>
+      </section>
+
       <section class="form-panel">
         <div class="section-title-row">
           <div><h2>Photos</h2><p class="muted">Add up to five images (5 MB each, 6 MB combined). A photo helps staff assess the issue.</p></div>
@@ -82,7 +98,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Geolocation } from '@capacitor/geolocation';
-import { alertController, IonButton, IonIcon, IonInput, IonProgressBar, IonSelect, IonSelectOption, IonTextarea } from '@ionic/vue';
+import { alertController, IonButton, IonCheckbox, IonIcon, IonInput, IonProgressBar, IonSelect, IonSelectOption, IonTextarea } from '@ionic/vue';
 import { imageOutline } from 'ionicons/icons';
 import AppShell from '@/components/AppShell.vue';
 import { subscribeBuildings, subscribeCategories, subscribeRooms } from '@/services/campus';
@@ -100,6 +116,8 @@ const priority = ref<'Low' | 'Normal' | 'High' | 'Urgent'>('Normal');
 const buildingId = ref('');
 const room = ref('');
 const otherLocation = ref('');
+const immediateResponseRequested = ref(false);
+const preferredStaffName = ref('');
 const buildings = ref<CampusBuilding[]>([]);
 const categories = ref<CampusCategory[]>([]);
 const rooms = ref<CampusRoom[]>([]);
@@ -218,6 +236,10 @@ async function confirmSubmit() {
       buildingName: building.name,
       room: (room.value === 'Other location' ? otherLocation.value : room.value).trim(),
       priority: priority.value,
+      ...(reporter.role === 'faculty' ? {
+        immediateResponseRequested: immediateResponseRequested.value,
+        preferredStaffName: preferredStaffName.value,
+      } : {}),
       photos: photos.value,
       ...(location.value ?? {}),
     };
@@ -262,6 +284,10 @@ onUnmounted(() => {
 .form-layout { max-width: 820px; }
 .form-panel { margin-bottom: 14px; padding: 22px; border: 1px solid var(--ion-color-step-150); border-radius: 10px; background: var(--ion-background-color); }
 .form-panel h2 { margin: 0 0 7px; font-size: 17px; }
+.faculty-request { border-color: #c5d9cb; background: #f7fbf8; }
+.faculty-request ion-checkbox { --size: 20px; margin: 0 0 8px; font-size: 13px; }
+.faculty-request ion-input { margin-bottom: 6px; }
+.request-hint { margin: 5px 0 0; color: var(--ion-color-medium); font-size: 11px; line-height: 1.5; }
 .muted { margin: 0 0 18px; color: var(--ion-color-medium); font-size: 12px; line-height: 1.5; }
 ion-input, ion-textarea, ion-select { margin: 16px 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 20px; }

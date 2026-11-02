@@ -13,9 +13,12 @@ import {
   doc,
   getDoc,
   getDocs,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import { getBytes, ref as storageRef, uploadBytes } from 'firebase/storage';
@@ -25,11 +28,13 @@ const projectId = 'demo-campusfix-rules-test';
 let environment: RulesTestEnvironment;
 
 const userProfiles = [
-  { uid: 'reporter-1', fullName: 'Reporter One', email: 'reporter@minsu.edu.ph', role: 'student', active: true },
-  { uid: 'reporter-2', fullName: 'Reporter Two', email: 'other@minsu.edu.ph', role: 'faculty', active: true },
-  { uid: 'reporter-3', fullName: 'Reporter Three', email: 'third@minsu.edu.ph', role: 'student', active: true },
-  { uid: 'maintenance-1', fullName: 'Maintenance One', email: 'maintenance@minsu.edu.ph', role: 'maintenance', active: true },
-  { uid: 'admin-1', fullName: 'Administrator One', email: 'admin@minsu.edu.ph', role: 'admin', active: true },
+  { uid: 'reporter-1', fullName: 'Reporter One', email: 'reporter@minsu.edu.ph', role: 'student', department: 'Science', active: true },
+  { uid: 'reporter-2', fullName: 'Reporter Two', email: 'other@minsu.edu.ph', role: 'faculty', department: 'Science', active: true },
+  { uid: 'reporter-3', fullName: 'Reporter Three', email: 'third@minsu.edu.ph', role: 'student', department: 'Education', active: true },
+  { uid: 'faculty-2', fullName: 'Faculty Two', email: 'faculty2@minsu.edu.ph', role: 'faculty', department: 'Science', active: true },
+  { uid: 'faculty-3', fullName: 'Faculty Three', email: 'faculty3@minsu.edu.ph', role: 'faculty', department: 'Education', active: true },
+  { uid: 'maintenance-1', fullName: 'Maintenance One', email: 'maintenance@minsu.edu.ph', role: 'maintenance', department: 'Facilities', active: true },
+  { uid: 'admin-1', fullName: 'Administrator One', email: 'admin@minsu.edu.ph', role: 'admin', department: 'Administration', active: true },
 ];
 
 async function seed() {
@@ -52,6 +57,8 @@ async function seed() {
       imageUrls: [],
       reporterUid: 'reporter-1',
       reporterName: 'Reporter One',
+      reporterRole: 'student',
+      reporterDepartment: 'Science',
       assignedToUid: null,
       assignedToName: null,
       createdAt: new Date(),
@@ -76,6 +83,48 @@ async function seed() {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+    await setDoc(doc(database, 'reports', 'report-3'), {
+      id: 'report-3',
+      title: 'Damaged faculty room outlet',
+      description: 'The electrical outlet in the faculty room sparks when used.',
+      category: 'Electrical',
+      categoryId: 'category-1',
+      buildingId: 'building-1',
+      buildingName: 'Main Building',
+      room: 'Faculty room',
+      priority: 'High',
+      status: 'Submitted',
+      imageUrls: [],
+      reporterUid: 'faculty-2',
+      reporterName: 'Faculty Two',
+      reporterRole: 'faculty',
+      reporterDepartment: 'Science',
+      assignedToUid: null,
+      assignedToName: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await setDoc(doc(database, 'reports', 'report-4'), {
+      id: 'report-4',
+      title: 'Broken classroom window',
+      description: 'The classroom window latch no longer keeps the window closed.',
+      category: 'Electrical',
+      categoryId: 'category-1',
+      buildingId: 'building-1',
+      buildingName: 'Main Building',
+      room: '105',
+      priority: 'Normal',
+      status: 'Submitted',
+      imageUrls: [],
+      reporterUid: 'faculty-3',
+      reporterName: 'Faculty Three',
+      reporterRole: 'faculty',
+      reporterDepartment: 'Education',
+      assignedToUid: null,
+      assignedToName: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
     await setDoc(doc(database, 'reportPhotos', 'report-1-photo-0'), {
       reportId: 'report-1',
       photoId: 'report-1-photo',
@@ -95,10 +144,10 @@ async function seed() {
 beforeAll(async () => {
   environment = await initializeTestEnvironment({
     projectId,
-    firestore: { rules: readFileSync('firestore.rules', 'utf8') },
-    storage: { rules: readFileSync('storage.rules', 'utf8') },
+    firestore: { host: '127.0.0.1', port: 8080, rules: readFileSync('firestore.rules', 'utf8') },
+    storage: { host: '127.0.0.1', port: 9199, rules: readFileSync('storage.rules', 'utf8') },
   });
-});
+}, 30000);
 beforeEach(async () => {
   await environment.clearFirestore();
   await environment.clearStorage();
@@ -123,6 +172,31 @@ describe('Firestore access control', () => {
     const reporter = authenticated('reporter-1', 'student');
     await assertSucceeds(getDoc(doc(reporter, 'reports', 'report-1')));
     await assertFails(getDoc(doc(reporter, 'reports', 'report-2')));
+  });
+
+  test('faculty can view faculty reports in their department but not student reports or another department', async () => {
+    const faculty = authenticated('reporter-2', 'faculty');
+    await assertSucceeds(getDoc(doc(faculty, 'reports', 'report-3')));
+    await assertSucceeds(getDoc(doc(faculty, 'reports', 'report-2')));
+    await assertFails(getDoc(doc(faculty, 'reports', 'report-1')));
+    await assertFails(getDoc(doc(faculty, 'reports', 'report-4')));
+  });
+
+  test('faculty department report query returns only own or same-department faculty reports', async () => {
+    const faculty = authenticated('reporter-2', 'faculty');
+    const departmentReports = await assertSucceeds(getDocs(query(
+      collection(faculty, 'reports'),
+      where('reporterRole', '==', 'faculty'),
+      where('reporterDepartment', '==', 'Science'),
+      orderBy('createdAt', 'desc'),
+    )));
+    expect(departmentReports.docs.map((item) => item.id)).toEqual(['report-3']);
+    const ownReports = await assertSucceeds(getDocs(query(
+      collection(faculty, 'reports'),
+      where('reporterUid', '==', 'reporter-2'),
+      orderBy('createdAt', 'desc'),
+    )));
+    expect(ownReports.docs.map((item) => item.id)).toEqual(['report-2']);
   });
 
   test('photo chunks are readable only by authorized viewers of their report', async () => {
@@ -336,6 +410,8 @@ describe('Firestore access control', () => {
       imageUrls: [],
       reporterUid: 'reporter-1',
       reporterName: 'Reporter One',
+      reporterRole: 'student',
+      reporterDepartment: 'Science',
       assignedToUid: null,
       assignedToName: null,
       createdAt: serverTimestamp(),
@@ -375,6 +451,95 @@ describe('Firestore access control', () => {
     });
     await assertSucceeds(batch.commit());
     await assertSucceeds(getDoc(doc(reporter, 'reportPhotos', 'report-photo-new')));
+  });
+
+  test('faculty can submit an immediate response request with a preferred staff member', async () => {
+    const faculty = authenticated('reporter-2', 'faculty');
+    const batch = writeBatch(faculty);
+    batch.set(doc(faculty, 'reports', 'faculty-request'), {
+      id: 'faculty-request',
+      title: 'Projector not working',
+      description: 'The projector in the main lecture room does not power on.',
+      category: 'Electrical',
+      categoryId: 'category-1',
+      buildingId: 'building-1',
+      buildingName: 'Main Building',
+      room: 'Lecture room',
+      priority: 'Normal',
+      status: 'Submitted',
+      lastHistoryId: 'faculty-request-history',
+      imageUrls: [],
+      reporterUid: 'reporter-2',
+      reporterName: 'Reporter Two',
+      reporterRole: 'faculty',
+      reporterDepartment: 'Science',
+      immediateResponseRequested: true,
+      preferredStaffName: 'Maintenance One',
+      assignedToUid: null,
+      assignedToName: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(faculty, 'reportHistory', 'faculty-request-history'), {
+      id: 'faculty-request-history',
+      reportId: 'faculty-request',
+      previousStatus: null,
+      newStatus: 'Submitted',
+      actorUid: 'reporter-2',
+      actorName: 'Reporter Two',
+      notes: 'Report submitted',
+      createdAt: serverTimestamp(),
+    });
+    batch.set(doc(faculty, 'notifications', 'faculty-request-notification'), {
+      id: 'faculty-request-notification',
+      recipientUid: 'reporter-2',
+      reportId: 'faculty-request',
+      title: 'Report submitted',
+      body: 'Your faculty report was submitted.',
+      read: false,
+      createdAt: serverTimestamp(),
+    });
+    await assertSucceeds(batch.commit());
+  });
+
+  test('students cannot submit faculty-only response requests', async () => {
+    const student = authenticated('reporter-1', 'student');
+    const batch = writeBatch(student);
+    batch.set(doc(student, 'reports', 'student-response-request'), {
+      id: 'student-response-request',
+      title: 'Broken classroom fan',
+      description: 'The fan in the classroom no longer turns on.',
+      category: 'Electrical',
+      categoryId: 'category-1',
+      buildingId: 'building-1',
+      buildingName: 'Main Building',
+      room: '204',
+      priority: 'Normal',
+      status: 'Submitted',
+      lastHistoryId: 'student-request-history',
+      imageUrls: [],
+      reporterUid: 'reporter-1',
+      reporterName: 'Reporter One',
+      reporterRole: 'student',
+      reporterDepartment: 'Science',
+      immediateResponseRequested: true,
+      preferredStaffName: 'Maintenance One',
+      assignedToUid: null,
+      assignedToName: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(student, 'reportHistory', 'student-request-history'), {
+      id: 'student-request-history',
+      reportId: 'student-response-request',
+      previousStatus: null,
+      newStatus: 'Submitted',
+      actorUid: 'reporter-1',
+      actorName: 'Reporter One',
+      notes: 'Report submitted',
+      createdAt: serverTimestamp(),
+    });
+    await assertFails(batch.commit());
   });
 
   test('only supported small images can be uploaded under the current user path', async () => {

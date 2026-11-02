@@ -32,6 +32,18 @@ export const REPORT_PAGE_SIZE = 25;
 
 function reportsQuery(profile: UserProfile, pageSize: number, cursor?: QueryDocumentSnapshot<DocumentData>) {
   const { database } = requireFirebase();
+  const reports = collection(database, 'reports');
+  if (profile.role === 'faculty') {
+    return query(
+      reports,
+      where('reporterRole', '==', 'faculty'),
+      where('reporterDepartment', '==', profile.department),
+      orderBy('createdAt', 'desc'),
+      ...(cursor ? [startAfter(cursor)] : []),
+      limit(pageSize),
+    );
+  }
+
   const constraints = profile.role === 'admin'
     ? [orderBy('createdAt', 'desc')]
     : [
@@ -39,11 +51,27 @@ function reportsQuery(profile: UserProfile, pageSize: number, cursor?: QueryDocu
       orderBy('createdAt', 'desc'),
     ];
   return query(
-    collection(database, 'reports'),
+    reports,
     ...constraints,
     ...(cursor ? [startAfter(cursor)] : []),
     limit(pageSize),
   );
+}
+
+function reporterReportsQuery(profile: UserProfile, pageSize: number, cursor?: QueryDocumentSnapshot<DocumentData>) {
+  const { database } = requireFirebase();
+  return query(
+    collection(database, 'reports'),
+    where('reporterUid', '==', profile.uid),
+    orderBy('createdAt', 'desc'),
+    ...(cursor ? [startAfter(cursor)] : []),
+    limit(pageSize),
+  );
+}
+
+function mergeReports(reports: FacilityReport[]): FacilityReport[] {
+  const unique = new Map(reports.map((report) => [report.id, report]));
+  return [...unique.values()].sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0));
 }
 
 export interface NewReportInput {
@@ -55,6 +83,8 @@ export interface NewReportInput {
   buildingName: string;
   room: string;
   priority: ReportPriority;
+  immediateResponseRequested?: boolean;
+  preferredStaffName?: string;
   photos: File[];
   latitude?: number;
   longitude?: number;
@@ -176,6 +206,12 @@ export async function createReport(
       imageUrls: [],
       reporterUid: user.uid,
       reporterName: reporter.fullName,
+      reporterRole: reporter.role,
+      reporterDepartment: reporter.department,
+      ...(reporter.role === 'faculty' ? {
+        immediateResponseRequested: input.immediateResponseRequested === true,
+        preferredStaffName: input.preferredStaffName?.trim() ?? '',
+      } : {}),
       assignedToUid: null,
       assignedToName: null,
       ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
@@ -269,20 +305,80 @@ export function subscribeReports(
   onError: (error: Error) => void,
   pageSize = 100,
 ): Unsubscribe {
+  if (profile.role === 'faculty') {
+    let departmentReports: FacilityReport[] = [];
+    let ownReports: FacilityReport[] = [];
+    const emit = () => onReports(mergeReports([...departmentReports, ...ownReports]).slice(0, pageSize));
+    const handleError = (error: Error) => onError(toUserFacingError(error, 'Unable to load reports.'));
+    const stopDepartment = onSnapshot(reportsQuery(profile, pageSize), (snapshot) => {
+      departmentReports = snapshot.docs.map((item) => item.data() as FacilityReport);
+      emit();
+    }, handleError);
+    const stopOwn = onSnapshot(reporterReportsQuery(profile, pageSize), (snapshot) => {
+      ownReports = snapshot.docs.map((item) => item.data() as FacilityReport);
+      emit();
+    }, handleError);
+    return () => {
+      stopDepartment();
+      stopOwn();
+    };
+  }
+
   return onSnapshot(reportsQuery(profile, pageSize), (snapshot) => {
     onReports(snapshot.docs.map((item) => item.data() as FacilityReport));
   }, (error) => onError(toUserFacingError(error, 'Unable to load reports.')));
 }
 
+interface FacultyReportsPageCursor {
+  mode: 'faculty';
+  department?: QueryDocumentSnapshot<DocumentData>;
+  own?: QueryDocumentSnapshot<DocumentData>;
+  pending: FacilityReport[];
+}
+
+export type ReportsPageCursor = QueryDocumentSnapshot<DocumentData> | FacultyReportsPageCursor;
+
 export async function getReportsPage(
   profile: UserProfile,
-  cursor?: QueryDocumentSnapshot<DocumentData>,
-): Promise<{ reports: FacilityReport[]; cursor?: QueryDocumentSnapshot<DocumentData> }> {
+  cursor?: ReportsPageCursor,
+): Promise<{ reports: FacilityReport[]; cursor?: ReportsPageCursor; hasMore: boolean }> {
   try {
-    const snapshot = await getDocs(reportsQuery(profile, REPORT_PAGE_SIZE, cursor));
+    if (profile.role === 'faculty') {
+      const facultyCursor = cursor && 'mode' in cursor ? cursor : undefined;
+      const [departmentSnapshot, ownSnapshot] = await Promise.all([
+        getDocs(reportsQuery(profile, REPORT_PAGE_SIZE + 1, facultyCursor?.department)),
+        getDocs(reporterReportsQuery(profile, REPORT_PAGE_SIZE + 1, facultyCursor?.own)),
+      ]);
+      const combined = mergeReports([
+        ...(facultyCursor?.pending ?? []),
+        ...departmentSnapshot.docs.map((item) => item.data() as FacilityReport),
+        ...ownSnapshot.docs.map((item) => item.data() as FacilityReport),
+      ]);
+      const reports = combined.slice(0, REPORT_PAGE_SIZE);
+      const pending = combined.slice(REPORT_PAGE_SIZE);
+      const hasMore = pending.length > 0
+        || departmentSnapshot.docs.length > REPORT_PAGE_SIZE
+        || ownSnapshot.docs.length > REPORT_PAGE_SIZE;
+      return {
+        reports,
+        hasMore,
+        ...(hasMore ? {
+          cursor: {
+            mode: 'faculty',
+            department: departmentSnapshot.docs.at(-1) ?? facultyCursor?.department,
+            own: ownSnapshot.docs.at(-1) ?? facultyCursor?.own,
+            pending,
+          },
+        } : {}),
+      };
+    }
+
+    const pageCursor = cursor && !('mode' in cursor) ? cursor : undefined;
+    const snapshot = await getDocs(reportsQuery(profile, REPORT_PAGE_SIZE, pageCursor));
     return {
       reports: snapshot.docs.map((item) => item.data() as FacilityReport),
       cursor: snapshot.docs.at(-1),
+      hasMore: snapshot.docs.length === REPORT_PAGE_SIZE,
     };
   } catch (error) {
     throw toUserFacingError(error, 'Unable to load reports.');

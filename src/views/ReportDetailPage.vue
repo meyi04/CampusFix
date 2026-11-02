@@ -24,6 +24,11 @@
             <div><span>Submitted</span><strong>{{ formatDate(report.createdAt) }}</strong></div>
             <div><span>Assigned to</span><strong>{{ report.assignedToName || 'Not yet assigned' }}</strong></div>
           </div>
+          <aside v-if="report.immediateResponseRequested || report.preferredStaffName" class="response-request">
+            <strong>{{ report.immediateResponseRequested ? 'Faculty requested an immediate response' : 'Faculty suggested preferred staff' }}</strong>
+            <span v-if="report.preferredStaffName">Preferred maintenance staff: {{ report.preferredStaffName }}</span>
+            <span>An administrator reviews the request and makes the assignment.<template v-if="report.immediateResponseRequested"> This does not guarantee a response time.</template></span>
+          </aside>
           <div v-if="report.latitude !== undefined && report.longitude !== undefined" class="location-info">
             <a :href="`https://www.openstreetmap.org/?mlat=${report.latitude}&mlon=${report.longitude}#map=18/${report.latitude}/${report.longitude}`" target="_blank" rel="noopener noreferrer">View optional location on OpenStreetMap</a>
           </div>
@@ -73,6 +78,9 @@
             <ion-select v-if="session.profile?.role === 'admin' && report.status === 'Approved'" v-model="assignedUid" label="Maintenance staff" label-placement="stacked" interface="popover" placeholder="Select staff">
               <ion-select-option v-for="staff in maintenanceUsers" :key="staff.uid" :value="staff.uid">{{ staff.fullName }}</ion-select-option>
             </ion-select>
+            <p v-if="session.profile?.role === 'admin' && report.status === 'Approved' && report.preferredStaffName" class="muted">
+              Faculty preferred {{ report.preferredStaffName }}. If that person is active, they are preselected; confirm or choose another staff member.
+            </p>
             <ion-textarea v-model="notes" label="Work notes" label-placement="stacked" placeholder="Add review feedback, work performed, or completion details." :auto-grow="true" />
             <ion-button v-for="action in availableActions" :key="action.status" expand="block" :fill="action.primary ? 'solid' : 'outline'" :disabled="busy || (action.status === 'Assigned' && !assignedUid)" @click="runAction(action.status)">
               {{ busy ? 'Saving...' : action.label }}
@@ -174,6 +182,12 @@ function maintenancePhotoUrl(photo: NonNullable<FacilityReport['maintenancePhoto
 }
 
 watch(report, (item) => { prioritySelection.value = item?.priority ?? 'Normal'; }, { immediate: true });
+watch([maintenanceUsers, report], ([users, item]) => {
+  const preferredName = item?.preferredStaffName?.trim().toLocaleLowerCase();
+  if (!preferredName || assignedUid.value) return;
+  const preferred = users.find((person) => person.fullName.trim().toLocaleLowerCase() === preferredName);
+  if (preferred) assignedUid.value = preferred.uid;
+});
 
 const actionHint = computed(() => {
   if (report.value?.status === 'Approved') return 'Choose the maintenance staff member responsible for this work order.';
@@ -257,6 +271,7 @@ async function loadReport(id: string) {
   stopComments?.();
   stopUsers?.();
   stopPhotos?.();
+  assignedUid.value = '';
   storedPhotos.value = [];
   photosError.value = '';
   loading.value = true;
@@ -292,6 +307,8 @@ onUnmounted(() => { stopReport?.(); stopHistory?.(); stopComments?.(); stopUsers
 .facts-grid div { display: flex; flex-direction: column; gap: 5px; }
 .facts-grid span { color: var(--ion-color-medium); font-size: 10px; }
 .facts-grid strong { font-size: 12px; }
+.response-request { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; padding: 13px; border-left: 3px solid #bd4b46; border-radius: 6px; color: #74332f; background: #fff4f3; font-size: 11px; line-height: 1.5; }
+.response-request strong { font-size: 12px; }
 .location-info { margin: 10px 0; font-size: 12px; }
 .location-info a { color: var(--ion-color-primary); }
 .photo-section { margin-top: 22px; }

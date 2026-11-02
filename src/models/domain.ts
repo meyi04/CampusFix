@@ -44,6 +44,10 @@ export interface FacilityReport {
   maintenancePhotos?: Array<{ photoId?: string; url?: string; phase: 'before' | 'after'; uploadedBy: string }>;
   reporterUid: string;
   reporterName: string;
+  reporterRole?: UserRole;
+  reporterDepartment?: string;
+  immediateResponseRequested?: boolean;
+  preferredStaffName?: string;
   assignedToUid: string | null;
   assignedToName: string | null;
   createdAt: Timestamp;

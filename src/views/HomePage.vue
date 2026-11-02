@@ -1,10 +1,10 @@
 <template>
-  <AppShell title="Good to see you" :subtitle="welcome">
+  <AppShell :title="session.profile?.role === 'faculty' ? 'Faculty workspace' : 'Good to see you'" :subtitle="welcome">
     <section class="welcome-strip">
       <div>
         <span class="welcome-tag">FACILITY SERVICE DESK</span>
-        <h2>Help keep MinSU running smoothly.</h2>
-        <p>Report an issue, then follow its progress right here.</p>
+        <h2>{{ session.profile?.role === 'faculty' ? 'Support your department’s learning spaces.' : 'Help keep MinSU running smoothly.' }}</h2>
+        <p>{{ session.profile?.role === 'faculty' ? `Review department reports for ${session.profile.department}, request faster response, and follow repairs.` : 'Report an issue, then follow its progress right here.' }}</p>
       </div>
       <ion-button v-if="session.profile?.role === 'student' || session.profile?.role === 'faculty'" router-link="/reports/new" class="new-report">
         <ion-icon slot="start" :icon="addOutline" />
@@ -44,8 +44,8 @@
     <section class="panel">
       <div class="section-heading">
         <div>
-          <h2>{{ session.profile?.role === 'maintenance' ? 'Assigned work' : 'Recent reports' }}</h2>
-          <p>{{ session.profile?.role === 'admin' ? 'Latest reports across campus.' : 'Updates to your facility reports.' }}</p>
+          <h2>{{ session.profile?.role === 'maintenance' ? 'Assigned work' : session.profile?.role === 'faculty' ? 'Department reports' : 'Recent reports' }}</h2>
+          <p>{{ session.profile?.role === 'admin' ? 'Latest reports across campus.' : session.profile?.role === 'faculty' ? `Faculty reports in ${session.profile.department}, including your own.` : 'Updates to your facility reports.' }}</p>
         </div>
         <router-link to="/reports" class="text-link">View all</router-link>
       </div>
@@ -60,6 +60,7 @@
           <strong>{{ report.title }}</strong>
           <span>{{ report.buildingName }}<template v-if="report.room"> · {{ report.room }}</template> · {{ report.category }}</span>
         </div>
+        <span v-if="report.immediateResponseRequested" class="request-chip">Immediate request</span>
         <span class="status-chip" :class="statusClass(report.status)">{{ report.status }}</span>
       </router-link>
     </section>
@@ -91,6 +92,14 @@ const summary = computed(() => {
   const active = reports.value.filter((report) => !['Resolved', 'Closed', 'Rejected'].includes(report.status));
   const progress = reports.value.filter((report) => ['Assigned', 'In Progress', 'Pending Verification'].includes(report.status));
   const resolved = reports.value.filter((report) => ['Resolved', 'Closed'].includes(report.status));
+  if (session.profile?.role === 'faculty') {
+    return [
+      { label: 'Department reports', count: reports.value.length, note: session.profile.department },
+      { label: 'Needs attention', count: active.length, note: 'Open reports' },
+      { label: 'Immediate requests', count: reports.value.filter((report) => report.immediateResponseRequested === true).length, note: 'Faculty flagged' },
+      { label: 'Resolved', count: resolved.length, note: 'Completed work' },
+    ];
+  }
   return [
     { label: 'Reports in view', count: reports.value.length, note: 'Most recent 100' },
     { label: 'Needs attention', count: active.length, note: 'Open reports' },
@@ -171,6 +180,7 @@ onUnmounted(() => unsubscribe?.());
 .report-main { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
 .report-main strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .report-main span { overflow: hidden; color: var(--ion-color-medium); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.request-chip { padding: 5px 7px; border-radius: 12px; color: #8c332e; background: #fbe8e7; font-size: 9px; white-space: nowrap; }
 .status-chip { padding: 5px 8px; border-radius: 20px; color: #69501c; background: #fff4d6; font-size: 10px; white-space: nowrap; }
 .status-chip.resolved, .status-chip.closed { color: #155b3b; background: #e4f2e9; }
 .status-chip.rejected { color: #852d2c; background: #fbe8e7; }

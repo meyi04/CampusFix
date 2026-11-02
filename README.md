@@ -5,7 +5,7 @@ CampusFix is a mobile-first Ionic Vue application for reporting and tracking fac
 ## Implemented functionality
 
 - Student/faculty/maintenance registration, sign-in, password reset, profile viewing, and protected Firestore-role-aware routes.
-- Facility report submission with managed campus building/category choices, optional rooms and location, validated photo attachments, upload progress, and duplicate-submit protection.
+- Facility report submission with managed campus building/category choices, optional rooms and location, validated photo attachments, upload progress, and duplicate-submit protection. Faculty can view reports submitted by faculty in their department, request an immediate response, and suggest preferred maintenance staff; administrators retain control of priority and assignment.
 - Real-time report lists, report details, comments, status timelines, maintenance assignments, before/after work photos, resolution notes, and reporter reopening of resolved reports.
 - Maintenance workflow: Assigned → In Progress → Pending Verification; administrators review, approve, reject, request clarification, assign work, verify, resolve, close, and prioritize.
 - Administrator views for live analytics, CSV export, campus directory management, account status and role management, announcements, and audit logs.
@@ -57,7 +57,7 @@ Do not deploy a `dist` folder built before Firebase configuration was available.
 
 ### Install from a browser
 
-CampusFix is a Progressive Web App and must be served from HTTPS (Firebase Hosting already provides HTTPS). On Android, open the hosted site in Chrome and choose **Install app** from the app header or browser menu. On desktop Chrome or Edge, use the install icon in the address bar or the browser menu. On iPhone/iPad, open the site in Safari, tap **Share**, then **Add to Home Screen**. The app shell and static assets can load offline; authentication, reports, and other live Firebase data still require an internet connection.
+CampusFix is a Progressive Web App and must be served from HTTPS (Firebase Hosting already provides HTTPS). On Android, open the hosted site in Chrome and choose **Install app** from the browser menu. On desktop Chrome or Edge, use the install icon in the address bar or the browser menu. On iPhone/iPad, open the site in Safari, tap **Share**, then **Add to Home Screen**. The app shell and static assets can load offline; authentication, reports, and other live Firebase data still require an internet connection.
 
 ## Firebase setup
 
@@ -96,6 +96,8 @@ Registration can create a student, faculty, or maintenance Firebase Authenticati
 For the first administrator, register an account normally. In Firebase Console, open Firestore Database, find `users/{uid}` for that account, and set its `role` field to `admin` and `active` to `true`. Find the UID in Authentication > Users. Deploy `firestore.rules` first; after setting the role, sign out and back in. Once the first administrator is active, manage later roles from the app's Users page. Do not allow users to update their own role in the rules.
 
 If a user is changed to a different role while signed in, have them sign out and back in to reload their permissions.
+
+Faculty report visibility is based on the department saved in each active faculty profile. Faculty see their own reports plus reports filed by other faculty in that same department; students' reports are not shared through this feature. An immediate-response request and preferred staff name are suggestions for administrators, who still review the report and make the assignment. Deploy both Firestore rules and indexes after updating the app.
 
 After signing in as an administrator, use **Add standard campus options** in **Campus directory** to add Admin Building, Educ Building, IABE, ASTEER, Student Center, Gymnasium, Auditorium, Canteen, CAS Building, Entrep Building, Tourism Building, Agriculture and ENI Sci as campus buildings and report categories, along with a general “Building” category. You can also manage buildings and categories individually. Add rooms/areas when useful. Report submission requires these live directory records; an empty directory is shown as an unavailable selection rather than silently replaced with demo data.
 

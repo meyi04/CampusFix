@@ -60,6 +60,11 @@ describe('user-facing errors', () => {
       .toBe('This view needs a Firestore index. Deploy the project indexes and wait for them to finish building.');
   });
 
+  test('translates missing-permissions errors into a helpful project/rules message', () => {
+    expect(getUserFacingError(new Error('Missing or insufficient permissions.'), 'Unable to load data.'))
+      .toBe('This Firebase project is blocking access for this account. Confirm the app is using the correct project and the deployed Firestore rules allow this role.');
+  });
+
   test('preserves useful errors and uses a fallback for unknown failures', () => {
     expect(getUserFacingError(new Error('Permission denied.'), 'Unable to load data.')).toBe('Permission denied.');
     expect(getUserFacingError(null, 'Unable to load data.')).toBe('Unable to load data.');

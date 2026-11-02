@@ -27,11 +27,18 @@
         return hasRole('maintenance');
       }
 
+      function isFaculty() {
+        return hasRole('faculty');
+      }
+
       function canViewReport(report) {
         return activeUser() && (
           isAdmin()
-          || report.reporterUid == request.auth.uid
-          || (isMaintenance() && report.assignedToUid == request.auth.uid)
+          || report.get('reporterUid', '') == request.auth.uid
+          || (isFaculty()
+            && report.get('reporterRole', '') == 'faculty'
+            && report.get('reporterDepartment', '') == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.department)
+          || (isMaintenance() && report.get('assignedToUid', '') == request.auth.uid)
         );
       }
 
@@ -224,14 +231,25 @@
           && request.resource.data.keys().hasOnly([
             'id', 'title', 'description', 'category', 'categoryId', 'buildingId',
             'buildingName', 'room', 'priority', 'status', 'imageUrls', 'reporterUid',
-            'reporterName', 'assignedToUid', 'assignedToName', 'latitude', 'longitude',
+            'reporterName', 'reporterRole', 'reporterDepartment', 'immediateResponseRequested',
+            'preferredStaffName', 'assignedToUid', 'assignedToName', 'latitude', 'longitude',
             'createdAt', 'updatedAt', 'lastHistoryId'
           ])
           && request.resource.data.id == reportId
           && request.resource.data.reporterUid == request.auth.uid
           && request.resource.data.reporterName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.fullName
+          && request.resource.data.reporterRole == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          && request.resource.data.reporterDepartment == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.department
           && request.resource.data.status == 'Submitted'
           && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['student', 'faculty']
+          && (
+            (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty'
+              && request.resource.data.immediateResponseRequested is bool
+              && request.resource.data.preferredStaffName is string
+              && request.resource.data.preferredStaffName.size() <= 100)
+            || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student'
+              && !request.resource.data.keys().hasAny(['immediateResponseRequested', 'preferredStaffName']))
+          )
           && request.resource.data.assignedToUid == null
           && request.resource.data.assignedToName == null
           && validPriority(request.resource.data.priority)
