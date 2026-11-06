@@ -10,6 +10,8 @@ const config = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
+export const firebaseProjectId = config.projectId;
+
 const requiredConfigKeys = Object.entries(config)
   .filter(([, value]) => !value)
   .map(([key]) => key);

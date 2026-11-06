@@ -249,6 +249,8 @@ describe('Firestore access control', () => {
 
   test('users cannot list accounts, edit their profile, or grant themselves privileged roles', async () => {
     const reporter = authenticated('reporter-1', 'student');
+    await assertSucceeds(getDoc(doc(reporter, 'users', 'reporter-1')));
+    await assertFails(getDoc(doc(reporter, 'users', 'reporter-2')));
     await assertFails(getDocs(collection(reporter, 'users')));
     await assertFails(updateDoc(doc(reporter, 'users', 'reporter-1'), { fullName: 'Changed Name' }));
     await assertFails(updateDoc(doc(reporter, 'users', 'reporter-1'), { role: 'admin' }));

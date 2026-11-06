@@ -37,13 +37,6 @@
           <ion-input v-else v-model="room" label="Room or specific location" label-placement="stacked" placeholder="e.g. Room 204 or east hallway" />
           <ion-input v-if="room === 'Other location' && rooms.length" v-model="otherLocation" label="Describe the location" label-placement="stacked" required />
         </div>
-        <div class="location-row">
-          <div><strong>Optional device location</strong><span>GPS is never required to submit your report.</span></div>
-          <ion-button type="button" fill="outline" size="small" :disabled="locationBusy" @click="addLocation">
-            {{ location ? 'Location added' : locationBusy ? 'Finding...' : 'Add location' }}
-          </ion-button>
-        </div>
-        <p v-if="locationError" class="error-text">{{ locationError }}</p>
       </section>
 
       <section v-if="session.profile?.role === 'faculty'" class="form-panel faculty-request">
@@ -64,8 +57,7 @@
 
       <section class="form-panel">
         <div class="section-title-row">
-          <div><h2>Photos</h2><p class="muted">Add up to five images (5 MB each, 6 MB combined). A photo helps staff assess the issue.</p></div>
-          <ion-button type="button" fill="outline" size="small" @click="takePhoto">Use camera</ion-button>
+          <div><h2>Photos</h2><p class="muted">Add up to five images (5 MB each, 6 MB combined). Photos upload when you submit your report.</p></div>
         </div>
         <label class="upload-drop">
           <input type="file" accept="image/*" multiple @change="selectPhotos" />
@@ -96,8 +88,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { Geolocation } from '@capacitor/geolocation';
 import { alertController, IonButton, IonCheckbox, IonIcon, IonInput, IonProgressBar, IonSelect, IonSelectOption, IonTextarea } from '@ionic/vue';
 import { imageOutline } from 'ionicons/icons';
 import AppShell from '@/components/AppShell.vue';
@@ -123,9 +113,6 @@ const categories = ref<CampusCategory[]>([]);
 const rooms = ref<CampusRoom[]>([]);
 const photos = ref<File[]>([]);
 const photoPreviews = ref<Array<{ file: File; url: string }>>([]);
-const location = ref<{ latitude: number; longitude: number } | null>(null);
-const locationError = ref('');
-const locationBusy = ref(false);
 const busy = ref(false);
 const progress = ref(0);
 const error = ref('');
@@ -174,39 +161,6 @@ function removePhoto(index: number) {
   photoPreviews.value = photoPreviews.value.filter((_, photoIndex) => photoIndex !== index);
 }
 
-async function takePhoto() {
-  error.value = '';
-  try {
-    const photo = await Camera.getPhoto({
-      quality: 80,
-      allowEditing: false,
-      resultType: CameraResultType.DataUrl,
-      source: CameraSource.Prompt,
-    });
-    if (!photo.dataUrl) throw new Error('The camera did not return an image.');
-    const blob = await (await fetch(photo.dataUrl)).blob();
-    const file = new File([blob], `campusfix-${Date.now()}.${photo.format || 'jpg'}`, { type: blob.type || 'image/jpeg' });
-    if (photos.value.length >= 5) throw new Error('Choose no more than five photos.');
-    if (!validTypes.includes(file.type) || file.size === 0 || file.size > 5 * 1024 * 1024) throw new Error('Choose a supported image no larger than 5 MB.');
-    addPhoto(file);
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : 'Unable to access a photo. You can still choose a file instead.';
-  }
-}
-
-async function addLocation() {
-  locationError.value = '';
-  locationBusy.value = true;
-  try {
-    const point = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 10000 });
-    location.value = { latitude: point.coords.latitude, longitude: point.coords.longitude };
-  } catch (cause) {
-    locationError.value = cause instanceof Error ? cause.message : 'Location was unavailable. You can still submit without it.';
-  } finally {
-    locationBusy.value = false;
-  }
-}
-
 async function confirmSubmit() {
   error.value = '';
   const reporter = session.profile;
@@ -241,7 +195,6 @@ async function confirmSubmit() {
         preferredStaffName: preferredStaffName.value,
       } : {}),
       photos: photos.value,
-      ...(location.value ?? {}),
     };
     const id = await createReport(input, reporter, (value) => { progress.value = value; });
     await router.replace(`/reports/${id}`);
@@ -291,12 +244,7 @@ onUnmounted(() => {
 .muted { margin: 0 0 18px; color: var(--ion-color-medium); font-size: 12px; line-height: 1.5; }
 ion-input, ion-textarea, ion-select { margin: 16px 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 20px; }
-.location-row, .section-title-row { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
-.location-row { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--ion-color-step-100); }
-.location-row div { display: flex; flex-direction: column; gap: 4px; }
-.location-row strong { font-size: 12px; }
-.location-row span { color: var(--ion-color-medium); font-size: 11px; }
-.section-title-row { align-items: flex-start; }
+.section-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 15px; }
 .upload-drop { display: flex; min-height: 130px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 1px dashed var(--ion-color-step-400); border-radius: 9px; color: var(--ion-color-medium); cursor: pointer; font-size: 11px; text-align: center; }
 .upload-drop input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 .upload-drop ion-icon { color: var(--ion-color-primary); font-size: 24px; }

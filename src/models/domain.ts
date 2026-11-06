@@ -55,8 +55,6 @@ export interface FacilityReport {
   startedAt?: Timestamp;
   completedAt?: Timestamp;
   resolutionNotes?: string;
-  latitude?: number;
-  longitude?: number;
 }
 
 export interface ReportHistoryEntry {

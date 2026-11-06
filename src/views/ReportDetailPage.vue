@@ -29,9 +29,6 @@
             <span v-if="report.preferredStaffName">Preferred maintenance staff: {{ report.preferredStaffName }}</span>
             <span>An administrator reviews the request and makes the assignment.<template v-if="report.immediateResponseRequested"> This does not guarantee a response time.</template></span>
           </aside>
-          <div v-if="report.latitude !== undefined && report.longitude !== undefined" class="location-info">
-            <a :href="`https://www.openstreetmap.org/?mlat=${report.latitude}&mlon=${report.longitude}#map=18/${report.latitude}/${report.longitude}`" target="_blank" rel="noopener noreferrer">View optional location on OpenStreetMap</a>
-          </div>
           <div v-if="reportedPhotoUrls.length" class="photo-section">
             <h3>Reported photos</h3>
             <div class="photo-grid">

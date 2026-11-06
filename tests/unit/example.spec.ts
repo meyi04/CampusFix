@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createCsv } from '@/utils/csv';
-import { getUserFacingError } from '@/utils/errors';
+import { getUserFacingError, isPermissionDeniedError } from '@/utils/errors';
 import { availableReportActions } from '@/services/workflow';
 import type { FacilityReport, UserProfile } from '@/models/domain';
 
@@ -62,7 +62,14 @@ describe('user-facing errors', () => {
 
   test('translates missing-permissions errors into a helpful project/rules message', () => {
     expect(getUserFacingError(new Error('Missing or insufficient permissions.'), 'Unable to load data.'))
-      .toBe('This Firebase project is blocking access for this account. Confirm the app is using the correct project and the deployed Firestore rules allow this role.');
+      .toBe('CampusFix could not access this Firestore data for your account. Ask a project administrator to verify the Firebase project and publish the current Firestore rules.');
+  });
+
+  test('recognizes Firebase permission-denied error codes', () => {
+    const error = Object.assign(new Error('Request failed.'), { code: 'permission-denied' });
+    expect(isPermissionDeniedError(error)).toBe(true);
+    expect(getUserFacingError(error, 'Unable to load data.'))
+      .toBe('CampusFix could not access this Firestore data for your account. Ask a project administrator to verify the Firebase project and publish the current Firestore rules.');
   });
 
   test('preserves useful errors and uses a fallback for unknown failures', () => {

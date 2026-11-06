@@ -175,7 +175,6 @@
 
       function linkedReportAudit(reportId) {
         let auditId = request.resource.data.lastAuditId;
-        let auditPath = /databases/$(database)/documents/auditLogs/$(auditId);
         return auditId is string
           && auditId != resource.data.get('lastAuditId', '')
           && (
@@ -232,7 +231,7 @@
             'id', 'title', 'description', 'category', 'categoryId', 'buildingId',
             'buildingName', 'room', 'priority', 'status', 'imageUrls', 'reporterUid',
             'reporterName', 'reporterRole', 'reporterDepartment', 'immediateResponseRequested',
-            'preferredStaffName', 'assignedToUid', 'assignedToName', 'latitude', 'longitude',
+            'preferredStaffName', 'assignedToUid', 'assignedToName',
             'createdAt', 'updatedAt', 'lastHistoryId'
           ])
           && request.resource.data.id == reportId

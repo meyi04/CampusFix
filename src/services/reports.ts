@@ -86,8 +86,6 @@ export interface NewReportInput {
   immediateResponseRequested?: boolean;
   preferredStaffName?: string;
   photos: File[];
-  latitude?: number;
-  longitude?: number;
 }
 
 function requireFirebase() {
@@ -214,8 +212,6 @@ export async function createReport(
       } : {}),
       assignedToUid: null,
       assignedToName: null,
-      ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
-      ...(input.longitude !== undefined ? { longitude: input.longitude } : {}),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });

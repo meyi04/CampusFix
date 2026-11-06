@@ -5,7 +5,7 @@ CampusFix is a mobile-first Ionic Vue application for reporting and tracking fac
 ## Implemented functionality
 
 - Student/faculty/maintenance registration, sign-in, password reset, profile viewing, and protected Firestore-role-aware routes.
-- Facility report submission with managed campus building/category choices, optional rooms and location, validated photo attachments, upload progress, and duplicate-submit protection. Faculty can view reports submitted by faculty in their department, request an immediate response, and suggest preferred maintenance staff; administrators retain control of priority and assignment.
+- Facility report submission with managed campus building/category choices, optional rooms, camera capture or selected photo attachments, upload progress, and duplicate-submit protection. Photos are uploaded with report submission. Faculty can view reports submitted by faculty in their department, request an immediate response, and suggest preferred maintenance staff; administrators retain control of priority and assignment.
 - Real-time report lists, report details, comments, status timelines, maintenance assignments, before/after work photos, resolution notes, and reporter reopening of resolved reports.
 - Maintenance workflow: Assigned → In Progress → Pending Verification; administrators review, approve, reject, request clarification, assign work, verify, resolve, close, and prioritize.
 - Administrator views for live analytics, CSV export, campus directory management, account status and role management, announcements, and audit logs.
@@ -88,6 +88,16 @@ CampusFix is a Progressive Web App and must be served from HTTPS (Firebase Hosti
    ```
 
    Wait for the index build to finish in Firebase Console before retrying the query.
+
+### Troubleshoot Firestore access
+
+If a signed-in user sees a Firestore permission error, compare the connected project ID shown by CampusFix with the project selected in Firebase Console. Then publish the repository's rules to that same project:
+
+```powershell
+firebase deploy --only firestore:rules --project YOUR_FIREBASE_PROJECT_ID
+```
+
+For a profile lookup error, also confirm `users/{uid}` exists in that project's Firestore database and has `active: true` and a supported `role`. The checked-in rules allow a signed-in user to read their own profile; they do not allow users to edit their own role. After an administrator corrects the profile or rules, sign out and back in. Never resolve permission errors by publishing open/test rules.
 
 ### Initial administrator and staff roles
 
